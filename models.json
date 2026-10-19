@@ -1,6 +1,6 @@
 {
-  "models": ["PASTE_MODEL_ID_1", "PASTE_MODEL_ID_2", "PASTE_MODEL_ID_3"],
-  "defaults": { "layer1": "PASTE_MODEL_ID_1", "layer2": "PASTE_MODEL_ID_1" },
+  "models": ["nvidia/nemotron-3-ultra-550b-a55b:free", "deepseek/deepseek-v4.1-flash", "google/gemini-3.8-flash", "anthropic/claude-sonnet-5.5"],
+  "defaults": { "layer1": "nvidia/nemotron-3-ultra-550b-a55b:free", "layer2": "nvidia/nemotron-3-ultra-550b-a55b:free" },
   "temperature": { "layer1": 0, "layer2": 0.7 },
   "useStructuredOutputs": false
 }

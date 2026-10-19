@@ -9,8 +9,13 @@ const ROOT = new URL('.', import.meta.url);
 
 // Milestone 1: every response is fake, no OpenRouter calls are made.
 const FAKE = true;
-// Extra dropdown entry in fake mode, so the "Invalid format" path can be tested.
+// Extra dropdown entries in fake mode, so both "Invalid format" labels can be tested.
 const FAKE_INVALID_MODEL = 'fake/always-invalid-json';
+const FAKE_RECOVERABLE_MODEL = 'fake/fenced-uppercase-json';
+const FAKE_MODELS = [
+  { id: FAKE_INVALID_MODEL, name: 'Fake: always returns invalid JSON' },
+  { id: FAKE_RECOVERABLE_MODEL, name: 'Fake: returns fenced, uppercase JSON (recoverable)' },
+];
 
 // Must match the allowed values written in prompts.js.
 const ALLOWED = {
@@ -44,6 +49,34 @@ function validateClassification(raw) {
     ok: true,
     parsed: { category: parsed.category, urgency: parsed.urgency, sentiment: parsed.sentiment },
   };
+}
+
+// For outputs that failed strict validation: would they pass after removing code fences
+// and/or lowercasing values? Returns a reason string, or null if not recoverable.
+// The output still counts as invalid either way.
+function recoverableReason(raw) {
+  const reasons = [];
+  let text = String(raw).trim();
+  const fenced = text.match(/^```[a-zA-Z]*\s*\n?([\s\S]*?)\n?```$/);
+  if (fenced) {
+    text = fenced[1].trim();
+    reasons.push('wrapped in code fences');
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  for (const field of Object.keys(ALLOWED)) {
+    if (typeof parsed[field] === 'string' && parsed[field] !== parsed[field].toLowerCase()) {
+      parsed[field] = parsed[field].toLowerCase();
+      if (!reasons.includes('values not lowercase')) reasons.push('values not lowercase');
+    }
+  }
+  if (!reasons.length || !validateClassification(JSON.stringify(parsed)).ok) return null;
+  return reasons.join(', ');
 }
 
 // ---------- Fake responses (Milestone 1) ----------
@@ -88,11 +121,13 @@ function fakeClassification(ticket) {
 }
 
 const FAKE_INVALID_OUTPUT = 'Sure! Here is the classification:\n```json\n{"category": "Billing", "urgency": "HIGH"}\n```';
+const fakeRecoverableOutput = (c) =>
+  '```json\n' + JSON.stringify({ category: c.category, urgency: c.urgency.toUpperCase(), sentiment: c.sentiment }) + '\n```';
 
 function fakeReply(c) {
   return `Hi there,
 
-Thanks for reaching out, and I'm sorry for the trouble. I can see this is a ${c.category} issue${c.urgency === 'high' ? ", and I've escalated it to our team as a priority" : ''}.
+Thanks for reaching out, and I'm sorry for the trouble${c.urgency === 'high' ? ". We're treating this as a priority" : ''}.
 
 I'm looking into it now and will get back to you by [time] with an update. If you have any extra details, such as [screenshots or account email], please reply to this message.
 
@@ -106,7 +141,7 @@ Best regards,
 
 async function checkModel(model) {
   const cfg = await loadConfig();
-  const allowed = FAKE ? [...cfg.models, FAKE_INVALID_MODEL] : cfg.models;
+  const allowed = FAKE ? [...cfg.models, ...FAKE_MODELS.map((m) => m.id)] : cfg.models;
   if (!allowed.includes(model)) throw new Error(`Model "${model}" is not in models.json.`);
   return cfg;
 }
@@ -116,14 +151,20 @@ async function handleClassify({ ticket, model }) {
   const cfg = await checkModel(model);
   const temperature = cfg.temperature?.layer1 ?? 0;
   const messages = classifyMessages(ticket);
-  const content = model === FAKE_INVALID_MODEL
-    ? FAKE_INVALID_OUTPUT
+  const content = model === FAKE_INVALID_MODEL ? FAKE_INVALID_OUTPUT
+    : model === FAKE_RECOVERABLE_MODEL ? fakeRecoverableOutput(fakeClassification(ticket))
     : JSON.stringify(fakeClassification(ticket));
   const result = await fakeCall(model, temperature, messages, content);
   const v = validateClassification(result.content);
-  return v.ok
-    ? { ok: true, parsed: v.parsed, raw: result.content, stats: result.stats }
-    : { ok: false, invalidFormat: true, reason: v.reason, raw: result.content, stats: result.stats };
+  if (v.ok) return { ok: true, parsed: v.parsed, raw: result.content, stats: result.stats };
+  return {
+    ok: false,
+    invalidFormat: true,
+    recoverable: recoverableReason(result.content),
+    reason: v.reason,
+    raw: result.content,
+    stats: result.stats,
+  };
 }
 
 async function handleReply({ ticket, classification, model }) {
@@ -141,7 +182,7 @@ async function handleReply({ ticket, classification, model }) {
 async function configPayload() {
   const cfg = await loadConfig();
   const models = cfg.models.map((id) => ({ id, name: id }));
-  if (FAKE) models.push({ id: FAKE_INVALID_MODEL, name: 'Fake: always returns invalid JSON' });
+  if (FAKE) models.push(...FAKE_MODELS);
   return { fake: FAKE, models, defaults: cfg.defaults, temperature: cfg.temperature, samples: SAMPLES };
 }
 

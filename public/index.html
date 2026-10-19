@@ -149,7 +149,8 @@ function renderL1(cell, r) {
       renderStats(r.stats));
   } else if (r.invalidFormat) {
     cell.replaceChildren(
-      el('span', { class: 'badge-bad' }, 'Invalid format'), ' ', el('span', {}, r.reason),
+      el('span', { class: 'badge-bad' }, r.recoverable ? `Invalid format (recoverable: ${r.recoverable})` : 'Invalid format'),
+      ' ', el('span', {}, r.reason),
       el('pre', { class: 'raw' }, r.raw),
       renderStats(r.stats));
   } else {

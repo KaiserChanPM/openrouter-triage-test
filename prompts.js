@@ -12,8 +12,12 @@ Allowed values:
 - sentiment: "negative", "neutral", "positive"
 
 Guidance:
-- Urgency reflects business impact (for example many users blocked, an outage, money lost), not how emotional the customer sounds.
+- Urgency reflects business impact, not how emotional the customer sounds:
+  - high: an outage, many users blocked, money lost or at risk, or a security concern
+  - medium: one user blocked, or a billing error that needs correcting
+  - low: questions, minor issues, feature requests
 - Sentiment reflects the customer's tone.
+- "account access" means one user's login, lockout or permissions problem. A failure affecting many users (for example a whole team unable to log in) is a "bug".
 - If the ticket raises more than one issue, use the category of the most urgent issue.`;
 
 export function classifyMessages(ticket) {
@@ -27,9 +31,11 @@ export function classifyMessages(ticket) {
 export const REPLY_SYSTEM = `You draft replies for a human support agent, who will review and edit your draft before sending it.
 
 Write a short, friendly, professional reply to the customer (under 120 words).
-- Use the classification to set priority and tone. For high urgency, say the issue has been escalated.
+- Use the classification to set priority and tone. For high urgency, say the issue is being treated as a priority. Do not claim it has been escalated.
+- Do not mention the classification itself to the customer.
 - Acknowledge every issue the customer raised.
 - Do not promise refunds, timelines or fixes you cannot know about. Use [square-bracket placeholders] for details the agent must fill in.
+- End with a sign-off using [Agent name].
 - Return only the reply text, with no subject line and no notes to the agent.`;
 
 export function replyMessages(ticket, classification) {

@@ -7,7 +7,7 @@ export const SAMPLES = [
   },
   {
     label: 'Polite, hidden outage',
-    expected: 'account access or bug / high / positive or neutral',
+    expected: 'bug / high / positive',
     text: `Hi there, hope you're having a good week! Just a small note, no rush at all: since about 8am this morning none of the 40 people on our team have been able to log in. We get a spinning wheel and then a "session error" message. We're mostly catching up on email in the meantime, so whenever you get a chance! Thanks so much, Priya`,
   },
   {
@@ -17,7 +17,7 @@ export const SAMPLES = [
   },
   {
     label: 'Plain bug report',
-    expected: 'bug / medium / neutral',
+    expected: 'bug / low / neutral',
     text: `When I export a report to CSV, the dates come out as MM/DD instead of DD/MM, even though my account locale is set to UK. Steps: Reports > Monthly > Export CSV. Browser: Chrome 130 on macOS.`,
   },
   {

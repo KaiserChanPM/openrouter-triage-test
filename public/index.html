@@ -76,6 +76,30 @@
   .marks { display: flex; gap: 6px; margin-bottom: 8px; }
   .mark { background: #e8f6ec; color: #1d6b35; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 4px; }
 
+  /* Test set */
+  .run.secondary { background: #fff; color: var(--accent); border: 1px solid var(--accent); margin-right: 8px; }
+  .btn-small { background: #fff; border: 1px solid var(--border); padding: 4px 10px; font-size: 13px; }
+  .btn-small:disabled { opacity: .5; cursor: default; }
+  .progress-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 10px 0; }
+  .progress-row progress { width: 200px; }
+  h3 { font-size: 14px; margin: 14px 0 6px; }
+  table.data { border-collapse: collapse; width: 100%; font-size: 13px; }
+  table.data th, table.data td { border: 1px solid var(--border); padding: 6px 8px; text-align: left; vertical-align: top; }
+  table.data thead th { background: #f2f3f5; }
+  table.data .tcol { min-width: 220px; max-width: 340px; }
+  table.data .error { padding: 4px 6px; }
+  .fv { white-space: nowrap; }
+  .fv.miss { background: var(--diff-bg); outline: 1px solid var(--diff-border); border-radius: 3px; padding: 0 4px; margin: 1px 0; }
+  details summary { cursor: pointer; }
+  .rubric { background: var(--ok-bg); border-radius: 6px; padding: 8px 12px; margin-bottom: 8px; font-size: 13.5px; }
+  .rblock { border-top: 1px solid var(--border); padding: 12px 0; }
+  .rblock-h { display: flex; gap: 6px; align-items: baseline; margin-bottom: 8px; }
+  .rgrid { display: grid; gap: 10px; overflow-x: auto; }
+  .rcard { border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: #fff; }
+  .rcard-h { font-size: 12.5px; font-weight: 600; margin-bottom: 6px; word-break: break-word; }
+  .score { margin-top: 8px; }
+  .score select { width: auto; }
+
   @media (max-width: 640px) {
     .controls.two, .controls.three, .fields { grid-template-columns: 1fr; }
   }
@@ -125,7 +149,10 @@
       <div class="hint">Only route to providers that don't keep your prompts and outputs. Models with no ZDR provider return an error instead of running. Applies to both views.</div>
     </div>
 
-    <div class="run-row"><button id="run" class="run" type="button">Run</button></div>
+    <div class="run-row">
+      <button id="run-batch" class="run secondary" type="button" hidden>Run test set</button>
+      <button id="run" class="run" type="button">Run</button>
+    </div>
   </section>
 
   <div id="results" hidden>
@@ -138,6 +165,41 @@
     <div id="mode-hint" class="hint"></div>
     <div class="grid-wrap"><table id="grid" class="grid"></table></div>
   </section>
+
+  <div id="batch" hidden>
+    <section class="card">
+      <h2>Test set results (testset.csv)</h2>
+      <div id="batch-meta" class="hint"></div>
+      <div class="progress-row">
+        <progress id="batch-bar" max="1" value="0"></progress>
+        <span id="batch-status"></span>
+        <button id="batch-stop" class="btn-small" type="button" hidden>Stop after this ticket</button>
+        <button id="batch-export" class="btn-small" type="button" disabled>Export CSV</button>
+      </div>
+      <h3>Summary per model</h3>
+      <div class="grid-wrap"><table id="batch-summary" class="data"></table></div>
+      <p class="hint">Accuracy is out of every ticket run, so an invalid format or an API error counts as wrong. "All 3 correct" means category, urgency and sentiment all match. Costs include both layers. Results live in this page only: export before you refresh.</p>
+    </section>
+
+    <section class="card">
+      <h2>Layer 1 per ticket: expected vs each model</h2>
+      <div class="grid-wrap"><table id="batch-tickets" class="data"></table></div>
+    </section>
+
+    <section class="card">
+      <h2>Layer 2 replies: score them</h2>
+      <div class="rubric">
+        <b>Rubric.</b> Score each reply on all four:
+        <b>Accurate</b> (addresses the real issues, no wrong facts) ·
+        <b>Tone</b> (fits the customer's mood and the urgency) ·
+        <b>Brief</b> (short, no filler) ·
+        <b>No promises</b> (no invented refunds, timelines or fixes).
+        <br><b>3</b> = good on all four, ready to send after a quick check · <b>2</b> = minor issues, small edits needed · <b>1</b> = a real problem to fix before sending.
+      </div>
+      <div id="batch-replies-mode" class="hint"></div>
+      <div id="batch-replies"></div>
+    </section>
+  </div>
 </main>
 
 <script>
@@ -318,9 +380,50 @@ function buildGrid(slots, mode) {
   return { l1Cells, l2Cells, l2Row };
 }
 
+const FAIR_BLOCKED = "Reference classification is invalid, so the fair test can't run. Pick another Reference or switch to End-to-end.";
+const currentSlots = () => SLOT_NAMES.map((name, i) => ({ name, model: $('#slot' + i).value })).filter((s) => s.model);
+const currentMode = () => document.querySelector('input[name=cmode]:checked').value;
+const slotHeader = (s) => `${s.name}: ${modelName(s.model)} (${s.model})`;
+
+// Runs one ticket through every slot in the given mode. Used by both Run and Run test set.
+// Returns { r1s, r2s, fairBlocked }; a skipped Layer 2 is { skipped: reason }.
+// `on` holds optional callbacks for live rendering: l1(i, r), l2Start(i), l2(i, r), l2Skip(i, reason), fairBlocked().
+async function runSlots({ ticket, slots, mode, zdr, on = {} }) {
+  // Layer 1 runs on every slot, in parallel.
+  const l1 = slots.map((s, i) => post('/api/classify', { ticket, model: s.model, zdr })
+    .then((r) => { on.l1?.(i, r); return r; }));
+
+  const runReply = (i, classification) => {
+    on.l2Start?.(i);
+    return post('/api/reply', { ticket, classification, model: slots[i].model, zdr })
+      .then((r) => { on.l2?.(i, r); return r; });
+  };
+
+  let l2, fairBlocked = false;
+  if (mode === 'fair') {
+    // Every Layer 2 uses the Reference classification, so only the Reference result gates it.
+    const ref = await l1[0];
+    if (ref.ok) {
+      l2 = slots.map((s, i) => runReply(i, ref.parsed));
+    } else {
+      fairBlocked = true;
+      on.fairBlocked?.();
+      l2 = slots.map(() => ({ skipped: FAIR_BLOCKED }));
+    }
+  } else {
+    // Each column's Layer 2 uses its own Layer 1 result.
+    l2 = l1.map((p, i) => p.then((r1) => {
+      if (r1.ok) return runReply(i, r1.parsed);
+      on.l2Skip?.(i, skipReason(r1));
+      return { skipped: skipReason(r1) };
+    }));
+  }
+  return { r1s: await Promise.all(l1), r2s: await Promise.all(l2), fairBlocked };
+}
+
 async function runCompare(ticket) {
-  const slots = SLOT_NAMES.map((name, i) => ({ name, model: $('#slot' + i).value })).filter((s) => s.model);
-  const mode = document.querySelector('input[name=cmode]:checked').value;
+  const slots = currentSlots();
+  const mode = currentMode();
   const zdr = $('#zdr').checked;
   $('#mode-label').textContent = MODE_TEXT[mode][0] + (zdr ? ' · ZDR only' : '');
   $('#mode-hint').textContent = MODE_TEXT[mode][1];
@@ -332,39 +435,17 @@ async function runCompare(ticket) {
     renderLoading(l2Cells[i], mode === 'fair' ? 'Waiting for the Reference classification…' : 'Waiting for Layer 1…');
   });
 
-  // Layer 1 runs on every slot, in parallel.
-  const l1 = slots.map((s, i) => post('/api/classify', { ticket, model: s.model, zdr })
-    .then((r) => { renderL1(l1Cells[i], r); return r; }));
-
-  const runReply = (i, classification) => {
-    renderLoading(l2Cells[i], 'Running…');
-    return post('/api/reply', { ticket, classification, model: slots[i].model, zdr })
-      .then((r) => { renderL2(l2Cells[i], r); return r; });
-  };
-
-  let l2;
-  if (mode === 'fair') {
-    // Every Layer 2 uses the Reference classification, so only the Reference result gates it.
-    const ref = await l1[0];
-    if (ref.ok) {
-      l2 = slots.map((s, i) => runReply(i, ref.parsed));
-    } else {
-      l2Row.replaceChildren(l2Row.firstChild, el('td', { colspan: slots.length },
-        el('div', { class: 'skipped' },
-          "Reference classification is invalid, so the fair test can't run. Pick another Reference or switch to End-to-end.")));
-      l2 = [];
-    }
-  } else {
-    // Each column's Layer 2 uses its own Layer 1 result.
-    l2 = l1.map((p, i) => p.then((r1) => {
-      if (r1.ok) return runReply(i, r1.parsed);
-      renderSkipped(l2Cells[i], skipReason(r1));
-      return null;
-    }));
-  }
-
-  const r1s = await Promise.all(l1);
-  const r2s = await Promise.all(l2);
+  const { r1s, r2s } = await runSlots({
+    ticket, slots, mode, zdr,
+    on: {
+      l1: (i, r) => renderL1(l1Cells[i], r),
+      l2Start: (i) => renderLoading(l2Cells[i], 'Running…'),
+      l2: (i, r) => renderL2(l2Cells[i], r),
+      l2Skip: (i, reason) => renderSkipped(l2Cells[i], reason),
+      fairBlocked: () => l2Row.replaceChildren(l2Row.firstChild,
+        el('td', { colspan: slots.length }, el('div', { class: 'skipped' }, FAIR_BLOCKED))),
+    },
+  });
   highlightDisagreements(r1s, l1Cells);
   markBest(r1s, l1Cells);
   markBest(r2s, l2Cells);
@@ -400,6 +481,245 @@ function markBest(results, cells) {
   }
 }
 
+// ---------- Test set (batch evaluation) ----------
+
+// Lives in memory only: refreshing the page clears it, so export before you leave.
+// { mode, zdr, slots, startedAt, total, rows: [{ item, r1s, r2s, fairBlocked }], scores: { 'ticketId|slot': 1-3 }, stop }
+let batch = null;
+
+const pct = (k, n) => (n ? `${k}/${n} (${Math.round((100 * k) / n)}%)` : '—');
+const avg = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+const fmtMs = (ms) => (ms == null ? '—' : `${Math.round(ms)} ms`);
+const shorten = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
+const scoreKey = (id, i) => `${id}|${i}`;
+// A call "completed" if the model answered (even with invalid JSON). Used for timing averages.
+const completed = (r) => r?.stats?.servedModel != null || (r?.ok && r.stats);
+
+function l1Status(r) {
+  if (r.ok) return 'ok';
+  if (r.invalidFormat) return r.recoverable ? 'invalid (recoverable)' : 'invalid';
+  return 'error';
+}
+
+function summarize() {
+  return batch.slots.map((s, i) => {
+    const n = batch.rows.length;
+    const correct = { category: 0, urgency: 0, sentiment: 0 };
+    let all3 = 0, invalid = 0, recoverable = 0, errors = 0, cost = 0;
+    const l1ms = [], l2ms = [], scores = [];
+    for (const row of batch.rows) {
+      const r1 = row.r1s[i], r2 = row.r2s[i];
+      if (r1.ok) {
+        const hits = FIELDS.filter((f) => r1.parsed[f] === row.item.expected[f]);
+        hits.forEach((f) => correct[f]++);
+        if (hits.length === FIELDS.length) all3++;
+      } else if (r1.invalidFormat) {
+        r1.recoverable ? recoverable++ : invalid++;
+      } else {
+        errors++;
+      }
+      for (const r of [r1, r2]) if (r?.stats?.costUsd != null) cost += r.stats.costUsd;
+      if (completed(r1)) l1ms.push(r1.stats.ms);
+      if (r2?.ok) l2ms.push(r2.stats.ms);
+      const sc = batch.scores[scoreKey(row.item.id, i)];
+      if (sc) scores.push(sc);
+    }
+    return { slot: s, n, correct, all3, invalid, recoverable, errors, cost,
+      avgCost: n ? cost / n : null, avgL1: avg(l1ms), avgL2: avg(l2ms), avgScore: avg(scores), scored: scores.length };
+  });
+}
+
+function renderSummary() {
+  const rows = summarize();
+  const head = ['Model', 'Category', 'Urgency', 'Sentiment', 'All 3 correct', 'Invalid format', 'Invalid (recoverable)',
+    'API errors', 'Total cost', 'Avg cost / ticket', 'Avg time L1', 'Avg time L2', 'Avg reply score'];
+  $('#batch-summary').replaceChildren(
+    el('thead', {}, el('tr', {}, ...head.map((h) => el('th', {}, h)))),
+    el('tbody', {}, ...rows.map((r) => el('tr', {},
+      el('th', {}, slotHeader(r.slot)),
+      ...FIELDS.map((f) => el('td', {}, pct(r.correct[f], r.n))),
+      el('td', {}, el('b', {}, pct(r.all3, r.n))),
+      el('td', {}, pct(r.invalid, r.n)),
+      el('td', {}, pct(r.recoverable, r.n)),
+      el('td', {}, pct(r.errors, r.n)),
+      el('td', {}, fmtUsd(r.cost)),
+      el('td', {}, fmtUsd(r.avgCost)),
+      el('td', {}, fmtMs(r.avgL1)),
+      el('td', {}, fmtMs(r.avgL2)),
+      el('td', {}, r.avgScore == null ? '— (not scored yet)' : `${r.avgScore.toFixed(2)} (${r.scored} scored)`)))));
+}
+
+function renderTicketsHeader() {
+  $('#batch-tickets').replaceChildren(
+    el('thead', {}, el('tr', {}, el('th', {}, 'id'), el('th', {}, 'Ticket'), el('th', {}, 'Expected'),
+      ...batch.slots.map((s) => el('th', {}, slotHeader(s))))),
+    el('tbody'));
+}
+
+function appendTicketRow(row) {
+  const exp = row.item.expected;
+  const classCell = (r) => {
+    if (r.ok) {
+      return el('td', {}, ...FIELDS.map((f) => {
+        const hit = r.parsed[f] === exp[f];
+        return el('div', { class: hit ? 'fv' : 'fv miss', title: hit ? '' : `Expected: ${exp[f]}` },
+          `${f}: ${r.parsed[f]}${hit ? '' : ' ✗'}`);
+      }));
+    }
+    if (r.invalidFormat) {
+      return el('td', {}, el('span', { class: 'badge-bad', title: r.raw },
+        r.recoverable ? `Invalid format (recoverable: ${r.recoverable})` : 'Invalid format'));
+    }
+    return el('td', {}, el('div', { class: 'error', title: r.error }, shorten(r.error || 'Error', 80)));
+  };
+  $('#batch-tickets tbody').append(el('tr', {},
+    el('td', {}, row.item.id),
+    el('td', { class: 'tcol' }, el('details', {}, el('summary', {}, shorten(row.item.ticket, 70)), row.item.ticket)),
+    el('td', {}, ...FIELDS.map((f) => el('div', { class: 'fv' }, `${f}: ${exp[f]}`))),
+    ...row.r1s.map(classCell)));
+}
+
+function scoreSelect(id, i) {
+  const sel = el('select', { 'aria-label': `Score for ticket ${id}, ${batch.slots[i].name}` });
+  sel.append(new Option('Score…', ''), new Option('1: needs fixing', '1'), new Option('2: minor issues', '2'), new Option('3: good', '3'));
+  sel.value = batch.scores[scoreKey(id, i)] ?? '';
+  sel.onchange = () => {
+    if (sel.value) batch.scores[scoreKey(id, i)] = Number(sel.value);
+    else delete batch.scores[scoreKey(id, i)];
+    renderSummary();
+  };
+  return sel;
+}
+
+function appendReplyBlock(row) {
+  const cards = batch.slots.map((s, i) => {
+    const r2 = row.r2s[i];
+    const body = r2?.ok ? el('div', { class: 'reply' }, r2.text)
+      : r2?.skipped ? el('div', { class: 'skipped' }, r2.skipped)
+      : el('div', { class: 'error' }, r2?.error || 'No reply');
+    const st = r2?.stats;
+    return el('div', { class: 'rcard' },
+      el('div', { class: 'rcard-h' }, slotHeader(s)),
+      fallbackNotice(st) ?? '',
+      body,
+      st ? el('div', { class: 'stats' }, `${st.provider ?? 'unknown'} · ${fmtUsd(st.costUsd)} · ${fmtMs(st.ms)}`) : null,
+      r2?.ok ? el('div', { class: 'score' }, scoreSelect(row.item.id, i)) : null);
+  });
+  $('#batch-replies').append(el('div', { class: 'rblock' },
+    el('div', { class: 'rblock-h' }, el('b', {}, `#${row.item.id} `),
+      el('details', {}, el('summary', {}, shorten(row.item.ticket, 110)), row.item.ticket)),
+    el('div', { class: 'rgrid', style: `grid-template-columns: repeat(${batch.slots.length}, minmax(240px, 1fr))` }, ...cards)));
+}
+
+function setBusy(busy) {
+  $('#run').disabled = busy;
+  $('#run-batch').disabled = busy;
+  $('#batch-stop').hidden = !batch || !busy;
+  $('#batch-export').disabled = busy || !batch?.rows.length;
+}
+
+$('#run-batch').onclick = async () => {
+  const set = await fetch('/api/testset').then((r) => r.json()).catch((e) => ({ ok: false, error: e.message }));
+  if (!set.ok) return alert(set.error);
+  if (!set.items.length) return alert('testset.csv has no valid tickets.');
+  if (set.errors.length && !confirm(`These rows in testset.csv will be skipped:\n${set.errors.join('\n')}\n\nContinue?`)) return;
+  const slots = currentSlots(), mode = currentMode(), zdr = $('#zdr').checked;
+  const calls = set.items.length * slots.length * 2;
+  if (!config.fake && !confirm(`Run ${set.items.length} tickets through ${slots.length} model(s), ${MODE_TEXT[mode][0]}? That's up to ${calls} OpenRouter calls, which cost credits.`)) return;
+
+  batch = { mode, zdr, slots, startedAt: new Date(), total: set.items.length, rows: [], scores: {}, stop: false };
+  $('#batch').hidden = false;
+  $('#batch-meta').textContent = `${MODE_TEXT[mode][0]}${zdr ? ' · ZDR only' : ''} · started ${batch.startedAt.toLocaleString()}`;
+  $('#batch-replies-mode').textContent = mode === 'fair'
+    ? "Fair layer test: every reply was written from the Reference model's classification."
+    : 'End-to-end: each reply was written from its own model\'s classification.';
+  $('#batch-replies').replaceChildren();
+  renderTicketsHeader();
+  renderSummary();
+  setBusy(true);
+  try {
+    // One ticket at a time, so free-model rate limits are less likely to break the run.
+    for (const [n, item] of set.items.entries()) {
+      if (batch.stop) break;
+      $('#batch-bar').max = batch.total;
+      $('#batch-bar').value = n;
+      $('#batch-status').textContent = `Running ticket ${n + 1} of ${batch.total} (id ${item.id})…`;
+      const out = await runSlots({ ticket: item.ticket, slots, mode, zdr });
+      const row = { item, ...out };
+      batch.rows.push(row);
+      appendTicketRow(row);
+      appendReplyBlock(row);
+      renderSummary();
+    }
+  } finally {
+    $('#batch-bar').value = batch.rows.length;
+    $('#batch-status').textContent = batch.stop && batch.rows.length < batch.total
+      ? `Stopped after ${batch.rows.length} of ${batch.total} tickets.`
+      : `Done: ${batch.rows.length} tickets.`;
+    setBusy(false);
+  }
+};
+
+$('#batch-stop').onclick = () => {
+  batch.stop = true;
+  $('#batch-status').textContent += ' Stopping after this ticket…';
+};
+
+// ---------- CSV export ----------
+
+function csvCell(v) {
+  const s = v == null ? '' : String(v);
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+$('#batch-export').onclick = () => {
+  const lines = [];
+  const line = (...cells) => lines.push(cells.map(csvCell).join(','));
+  const ratio = (k, n) => (n ? (k / n).toFixed(3) : '');
+  const usd = (c) => (c == null ? '' : Number(c.toFixed(8))); // trims float noise like 0.07047250000000001
+
+  line('Test set run', batch.startedAt.toISOString(), 'mode', batch.mode, 'zdr', batch.zdr ? 'on' : 'off', 'tickets', batch.rows.length);
+  line();
+  line('SUMMARY');
+  line('slot', 'model', 'tickets', 'category_accuracy', 'urgency_accuracy', 'sentiment_accuracy', 'all3_accuracy',
+    'invalid_rate', 'invalid_recoverable_rate', 'error_rate', 'total_cost_usd', 'avg_cost_per_ticket_usd',
+    'avg_ms_layer1', 'avg_ms_layer2', 'avg_reply_score', 'replies_scored');
+  for (const r of summarize()) {
+    line(r.slot.name, r.slot.model, r.n, ...FIELDS.map((f) => ratio(r.correct[f], r.n)), ratio(r.all3, r.n),
+      ratio(r.invalid, r.n), ratio(r.recoverable, r.n), ratio(r.errors, r.n), usd(r.cost), usd(r.avgCost),
+      r.avgL1 == null ? '' : Math.round(r.avgL1), r.avgL2 == null ? '' : Math.round(r.avgL2),
+      r.avgScore == null ? '' : r.avgScore.toFixed(2), r.scored);
+  }
+  line();
+  line('PER TICKET');
+  line('ticket_id', 'ticket', 'expected_category', 'expected_urgency', 'expected_sentiment', 'slot', 'model',
+    'l1_status', 'got_category', 'got_urgency', 'got_sentiment', 'l1_fields_correct', 'l1_raw_or_error',
+    'l1_provider', 'l1_cost_usd', 'l1_ms', 'l2_status', 'reply_or_reason', 'l2_provider', 'l2_cost_usd', 'l2_ms',
+    'fallback_used', 'reply_score');
+  for (const row of batch.rows) {
+    batch.slots.forEach((s, i) => {
+      const r1 = row.r1s[i], r2 = row.r2s[i], e = row.item.expected;
+      const got = r1.ok ? r1.parsed : {};
+      const l2status = r2?.ok ? 'ok' : r2?.skipped ? 'skipped' : 'error';
+      line(row.item.id, row.item.ticket, e.category, e.urgency, e.sentiment, s.name, s.model,
+        l1Status(r1), got.category, got.urgency, got.sentiment,
+        r1.ok ? FIELDS.filter((f) => got[f] === e[f]).length : 0,
+        r1.ok ? '' : (r1.raw ?? r1.error),
+        r1.stats?.provider, usd(r1.stats?.costUsd), r1.stats?.ms,
+        l2status, r2?.ok ? r2.text : (r2?.skipped ?? r2?.error), r2?.stats?.provider, usd(r2?.stats?.costUsd), r2?.stats?.ms,
+        r1.stats?.fallbackUsed || r2?.stats?.fallbackUsed ? 'yes' : '',
+        batch.scores[scoreKey(row.item.id, i)] ?? '');
+    });
+  }
+  // BOM so Excel reads accents (e.g. the French ticket) correctly.
+  const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = el('a', { href: URL.createObjectURL(blob), download: `test-set-${batch.startedAt.toISOString().slice(0, 16).replace(/[:T]/g, '-')}.csv` });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
+};
+
 // ---------- View switching and Run ----------
 
 const currentView = () => document.querySelector('input[name=view]:checked').value;
@@ -409,8 +729,10 @@ for (const input of document.querySelectorAll('input[name=view]')) {
     const compare = currentView() === 'compare';
     $('#single-controls').hidden = compare;
     $('#compare-controls').hidden = !compare;
+    $('#run-batch').hidden = !compare;
     $('#results').hidden = compare || !$('#l1').hasChildNodes();
     $('#compare-results').hidden = !compare || !$('#grid').hasChildNodes();
+    $('#batch').hidden = !compare || !batch;
   };
 }
 
@@ -418,11 +740,13 @@ $('#run').onclick = async () => {
   const ticket = $('#ticket').value.trim();
   if (!ticket) { alert('Paste a ticket or pick a sample first.'); return; }
   $('#run').disabled = true;
+  $('#run-batch').disabled = true;
   try {
     if (currentView() === 'compare') await runCompare(ticket);
     else await runSingle(ticket);
   } finally {
     $('#run').disabled = false;
+    $('#run-batch').disabled = false;
   }
 };
 

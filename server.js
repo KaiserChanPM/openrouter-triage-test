@@ -355,6 +355,53 @@ async function handleReply({ ticket, classification, model, backup, zdr }) {
   return { ok: true, text: result.content, stats: result.stats };
 }
 
+// ---------- Test set (testset.csv) ----------
+
+// Minimal CSV parser: commas, quoted fields, "" escapes, newlines inside quotes.
+function parseCsv(text) {
+  const rows = [];
+  let row = [], field = '', quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
+      else if (c === '"') quoted = false;
+      else field += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(field); rows.push(row); row = []; field = '';
+    } else field += c;
+  }
+  if (field || row.length) { row.push(field); rows.push(row); }
+  return rows.filter((r) => r.some((f) => f.trim()));
+}
+
+// Re-read on every request, so edits to testset.csv apply without a restart.
+async function loadTestset() {
+  const text = (await readFile(new URL('testset.csv', ROOT), 'utf8')).replace(/^﻿/, '');
+  const [header, ...rows] = parseCsv(text);
+  const cols = ['id', 'ticket', 'expected_category', 'expected_urgency', 'expected_sentiment'];
+  const idx = Object.fromEntries(cols.map((c) => [c, header.map((h) => h.trim()).indexOf(c)]));
+  const missing = cols.filter((c) => idx[c] < 0);
+  if (missing.length) return { ok: false, error: `testset.csv is missing columns: ${missing.join(', ')}` };
+
+  const items = [], errors = [];
+  for (const r of rows) {
+    const item = {
+      id: r[idx.id]?.trim(),
+      ticket: r[idx.ticket]?.trim(),
+      expected: Object.fromEntries(Object.keys(ALLOWED).map((f) => [f, r[idx[`expected_${f}`]]?.trim()])),
+    };
+    const bad = Object.keys(ALLOWED).filter((f) => !ALLOWED[f].includes(item.expected[f]));
+    if (!item.ticket) errors.push(`Row ${item.id ?? '?'}: empty ticket`);
+    else if (bad.length) errors.push(`Row ${item.id}: invalid ${bad.map((f) => `${f} "${item.expected[f]}"`).join(', ')}`);
+    else items.push(item);
+  }
+  return { ok: true, items, errors };
+}
+
 async function configPayload() {
   const cfg = await loadConfig();
   const cat = await getCatalogue();
@@ -388,6 +435,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, await readFile(new URL('public/index.html', ROOT)), 'text/html; charset=utf-8');
     }
     if (req.method === 'GET' && req.url === '/api/config') return sendJson(res, await configPayload());
+    if (req.method === 'GET' && req.url === '/api/testset') return sendJson(res, await loadTestset());
     if (req.method === 'POST' && req.url === '/api/classify') return sendJson(res, await handleClassify(await readJson(req)));
     if (req.method === 'POST' && req.url === '/api/reply') return sendJson(res, await handleReply(await readJson(req)));
     send(res, 404, 'Not found', 'text/plain');

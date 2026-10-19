@@ -54,6 +54,19 @@ Switch to **Compare models** at the top of the page. Pick a **Reference** model 
 - **End-to-end**: who handles the ticket best from start to finish? Each model classifies the ticket itself, then writes its reply from its own classification, mistakes included.
 - Layer 1 fields that differ from the Reference are highlighted. 💲 marks the cheapest and ⚡ the fastest successful result in each row.
 
+## Test set (batch evaluation)
+
+`testset.csv` holds 15 tickets with the expected classification for each, in the columns `id, ticket, expected_category, expected_urgency, expected_sentiment`. Edit it freely; it's re-read on every run. Rows with values outside the allowed lists are skipped, with a warning.
+
+In **Compare models**, click **Run test set**. Every ticket goes through the selected slots in the current mode (fair or end-to-end), with the same skip and invalid-format rules as a single run. Tickets run one at a time, so free-model rate limits are less likely to break the run, and a progress bar tracks the run. Within a ticket, the slots run in parallel.
+
+- **Summary per model:** Layer 1 accuracy per field and for all three fields together, compared with the expected values. Invalid format and API errors count as wrong. It also shows the invalid-format rate (recoverable counted separately), the API error rate, total and average cost, average time per layer, and the average reply score.
+- **Layer 1 per ticket:** the expected values next to each model's classification, with mismatches highlighted.
+- **Layer 2 replies:** all replies for each ticket side by side, each with a 1–3 score using the rubric shown (accurate, tone, brief, no promises). Averages update as you score.
+- **Export CSV:** one file with the run details, the summary and a per-ticket section (both layers, stats, replies and your scores).
+
+Results live only in the open page: export before refreshing.
+
 ## Backup models and zero data retention
 
 - **Backup model** (Single run only): pick an optional backup for each layer. The app sends OpenRouter a `models: [main, backup]` array ([model fallbacks](https://openrouter.ai/docs/guides/routing/model-fallbacks)). If the main model fails, the backup answers and is billed, and the cell shows "Fallback used". A mistyped model ID is rejected outright, and the backup isn't tried.
@@ -84,4 +97,31 @@ Built with Claude Code. I defined the scope, milestones and decisions.
 
 ## Findings
 
-<!-- To fill in after testing models. -->
+<!-- Filled in after running the test set. The exported CSV can live next to this README. -->
+
+### Models tested
+
+<!-- Which models were in which slot, the compare mode (fair or end-to-end), ZDR on or off, and the date of the run. -->
+
+### Results
+
+<!-- Key numbers from the summary table: accuracy per field and all-3, invalid-format rate (recoverable separately),
+     cost per ticket, response time, and average reply score. Which tickets tripped models up? -->
+
+### Decision per layer
+
+#### Layer 1: classify
+
+**Model:** <!-- chosen model -->
+
+**Why:** <!-- accuracy vs cost vs speed vs format reliability -->
+
+#### Layer 2: draft reply
+
+**Model:** <!-- chosen model -->
+
+**Why:** <!-- reply scores vs cost vs speed -->
+
+### Why (overall)
+
+<!-- What the trade-offs were, what surprised me, and what I would test next. -->

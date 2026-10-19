@@ -11,13 +11,15 @@ const OPENROUTER_URL = 'https://openrouter.ai/api/v1';
 const API_KEY = process.env.OPENROUTER_API_KEY;
 // Fake mode: no key set, or forced with FAKE=1 npm start. No OpenRouter calls are made.
 const FAKE = !API_KEY || process.env.FAKE === '1';
-// Extra dropdown entries in fake mode, so both "Invalid format" labels can be tested.
+// Local test models, always in the dropdowns, so both "Invalid format" labels can be tested.
+// They are answered by this server and never sent to OpenRouter, even in live mode.
 const FAKE_INVALID_MODEL = 'fake/always-invalid-json';
 const FAKE_RECOVERABLE_MODEL = 'fake/fenced-uppercase-json';
 const FAKE_MODELS = [
-  { id: FAKE_INVALID_MODEL, name: 'Fake: always returns invalid JSON' },
-  { id: FAKE_RECOVERABLE_MODEL, name: 'Fake: returns fenced, uppercase JSON (recoverable)' },
+  { id: FAKE_INVALID_MODEL, name: 'Test: always returns invalid JSON (local, no API call)' },
+  { id: FAKE_RECOVERABLE_MODEL, name: 'Test: returns fenced, uppercase JSON (local, no API call)' },
 ];
+const isFakeModel = (id) => FAKE_MODELS.some((m) => m.id === id);
 
 // Must match the allowed values written in prompts.js.
 const ALLOWED = {
@@ -96,7 +98,7 @@ async function fakeCall(model, temperature, messages, content) {
     stats: {
       requestedModel: model,
       servedModel: model,
-      provider: 'FakeProvider',
+      provider: 'Local test (no API call)',
       promptTokens,
       completionTokens,
       costUsd: ((promptTokens * 0.5 + completionTokens * 1.5) / 1e6) * rand(1, 20),
@@ -264,9 +266,9 @@ function structuredOutputParams() {
   };
 }
 
-// Live call, or a fake one in fake mode. fakeContent is only evaluated in fake mode.
+// Live call, or a fake one in fake mode or for a local test model. fakeContent is only evaluated for fake calls.
 function callModel({ model, messages, temperature, extra, fakeContent }) {
-  return FAKE
+  return FAKE || isFakeModel(model)
     ? fakeCall(model, temperature, messages, fakeContent())
     : openrouterChat({ model, messages, temperature, extra });
 }
@@ -275,7 +277,7 @@ function callModel({ model, messages, temperature, extra, fakeContent }) {
 
 async function checkModel(model) {
   const cfg = await loadConfig();
-  const allowed = FAKE ? [...cfg.models, ...FAKE_MODELS.map((m) => m.id)] : cfg.models;
+  const allowed = [...cfg.models, ...FAKE_MODELS.map((m) => m.id)];
   if (!allowed.includes(model)) throw new Error(`Model "${model}" is not in models.json.`);
   return cfg;
 }
@@ -338,7 +340,7 @@ async function configPayload() {
     name: cat.get(id)?.name ?? id,
     found: FAKE || cat.size === 0 ? null : cat.has(id),
   }));
-  if (FAKE) models.push(...FAKE_MODELS);
+  models.push(...FAKE_MODELS);
   return { fake: FAKE, models, defaults: cfg.defaults, temperature: cfg.temperature, samples: SAMPLES };
 }
 

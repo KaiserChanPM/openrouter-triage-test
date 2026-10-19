@@ -44,12 +44,14 @@ Save the file and refresh the page. You don't need to restart the server.
 
 A model ID that isn't in OpenRouter's catalogue shows as "⚠ … (not in OpenRouter catalogue)" in the dropdowns.
 
+The dropdowns always include two **Test** models that the local server answers itself, with no API call and no cost. One always returns invalid JSON and the other returns recoverable JSON, so you can check how the app handles bad output.
+
 ## Compare mode
 
 Switch to **Compare models** at the top of the page. Pick a **Reference** model (required) and up to two more models, then click Run. Results show as a grid: one column per model, with a Layer 1 row and a Layer 2 row. Every cell shows the provider OpenRouter routed that call to, because the same model can be served by different providers on different runs.
 
-- **Fair layer test** (default): Layer 1 runs on every model. Layer 2 runs on every model using the Reference model's classification, so replies differ only because of the model. If the Reference classification is invalid, no replies are drafted.
-- **End-to-end**: each column runs both layers with its own model.
+- **Fair layer test** (default): who writes the best reply from the same facts? Every model writes its reply from the Reference model's classification, so any difference between replies comes from the model itself. The classification row still shows what each model would have chosen. If the Reference classification is invalid, no replies are drafted.
+- **End-to-end**: who handles the ticket best from start to finish? Each model classifies the ticket itself, then writes its reply from its own classification, mistakes included.
 - Layer 1 fields that differ from the Reference are highlighted. 💲 marks the cheapest and ⚡ the fastest successful result in each row.
 
 ## What each stat means

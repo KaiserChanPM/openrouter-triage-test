@@ -106,10 +106,10 @@
       </div>
       <fieldset class="cmode">
         <legend>Compare mode</legend>
-        <label><input type="radio" name="cmode" value="fair" checked> <b>Fair layer test</b>
-          <span class="hint">: every model's reply uses the Reference classification, so replies differ only because of the model.</span></label>
-        <label><input type="radio" name="cmode" value="e2e"> <b>End-to-end</b>
-          <span class="hint">: each model runs both layers on its own, comparing whole pipelines.</span></label>
+        <label><input type="radio" name="cmode" value="fair" checked> <b>Fair layer test</b>: who writes the best reply from the same facts?
+          <span class="hint"><br>Every model writes its reply from the <i>Reference</i> model's classification, so any difference between replies comes from the model itself.</span></label>
+        <label><input type="radio" name="cmode" value="e2e"> <b>End-to-end</b>: who handles the ticket best from start to finish?
+          <span class="hint"><br>Each model classifies the ticket itself, then writes its reply from <i>its own</i> classification, mistakes included.</span></label>
       </fieldset>
     </div>
 
@@ -267,10 +267,10 @@ async function runSingle(ticket) {
 // ---------- Compare ----------
 
 const MODE_TEXT = {
-  fair: ['Mode: Fair layer test',
-    "Layer 1 runs on every model. Layer 2 runs on every model using the Reference model's classification, so replies differ only because of the model."],
-  e2e: ['Mode: End-to-end',
-    'Each column runs both layers with its own model, so you are comparing whole pipelines.'],
+  fair: ['Mode: Fair layer test (who writes the best reply from the same facts?)',
+    "Every reply below was written from the Reference model's classification. The classification row still shows what each model would have chosen, but only the Reference's was used."],
+  e2e: ['Mode: End-to-end (who handles the ticket best from start to finish?)',
+    'Each column is a complete pipeline: the model classified the ticket, then wrote its reply from its own classification.'],
 };
 
 function buildGrid(slots, mode) {

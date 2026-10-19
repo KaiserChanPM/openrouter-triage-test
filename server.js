@@ -7,8 +7,10 @@ const HOST = '127.0.0.1'; // local machine only
 const PORT = Number(process.env.PORT) || 3000;
 const ROOT = new URL('.', import.meta.url);
 
-// Milestone 1: every response is fake, no OpenRouter calls are made.
-const FAKE = true;
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1';
+const API_KEY = process.env.OPENROUTER_API_KEY;
+// Fake mode: no key set, or forced with FAKE=1 npm start. No OpenRouter calls are made.
+const FAKE = !API_KEY || process.env.FAKE === '1';
 // Extra dropdown entries in fake mode, so both "Invalid format" labels can be tested.
 const FAKE_INVALID_MODEL = 'fake/always-invalid-json';
 const FAKE_RECOVERABLE_MODEL = 'fake/fenced-uppercase-json';
@@ -137,6 +139,135 @@ Best regards,
 (Fake reply: no model was called.)`;
 }
 
+// ---------- OpenRouter (live mode) ----------
+
+// Model catalogue, for display names and supported parameters. Cached for 10 minutes.
+// Docs: https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties
+let catalogue = { at: 0, byId: new Map() };
+async function getCatalogue() {
+  if (FAKE) return catalogue.byId;
+  if (Date.now() - catalogue.at < 10 * 60 * 1000) return catalogue.byId;
+  try {
+    const res = await fetch(`${OPENROUTER_URL}/models`, { headers: { Authorization: `Bearer ${API_KEY}` } });
+    const data = await res.json();
+    if (!Array.isArray(data?.data)) throw new Error(data?.error?.message || `HTTP ${res.status}`);
+    catalogue = { at: Date.now(), byId: new Map(data.data.map((m) => [m.id, m])) };
+  } catch (err) {
+    console.warn('Could not load the OpenRouter model catalogue:', err.message);
+  }
+  return catalogue.byId;
+}
+
+const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Fallback only: generation stats, if router metadata didn't name the provider.
+// Docs: https://openrouter.ai/docs/api-reference/get-a-generation
+async function providerFromGeneration(id) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await sleepMs(500 * (attempt + 1)); // stats can take a moment to appear
+    try {
+      const res = await fetch(`${OPENROUTER_URL}/generation?id=${encodeURIComponent(id)}`, {
+        headers: { Authorization: `Bearer ${API_KEY}` },
+      });
+      if (res.ok) return (await res.json())?.data?.provider_name ?? null;
+    } catch {}
+  }
+  return null;
+}
+
+// One chat completion. Returns { content, stats }, or throws an Error carrying .stats.
+// Docs: https://openrouter.ai/docs/api/api-reference/chat/send-chat-completion-request
+async function openrouterChat({ model, messages, temperature, extra = {} }) {
+  const cat = await getCatalogue();
+  const entry = cat.get(model);
+  const stats = {
+    requestedModel: model,
+    servedModel: null,
+    provider: null,
+    promptTokens: null,
+    completionTokens: null,
+    costUsd: null,
+    ms: null,
+    temperature,
+    // null = unknown (model not found in catalogue)
+    temperatureSupported: entry ? (entry.supported_parameters ?? []).includes('temperature') : null,
+    structuredOutputs: Boolean(extra.response_format),
+  };
+
+  const start = Date.now();
+  let res, data;
+  try {
+    res = await fetch(`${OPENROUTER_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${API_KEY}`,
+        'Content-Type': 'application/json',
+        // Adds openrouter_metadata (incl. the selected provider) to the response.
+        // Docs: https://openrouter.ai/docs/guides/features/router-metadata
+        'X-OpenRouter-Metadata': 'enabled',
+        'X-OpenRouter-Title': 'openrouter-triage-test',
+      },
+      body: JSON.stringify({ model, messages, temperature, ...extra }),
+    });
+    data = await res.json().catch(() => null);
+  } finally {
+    stats.ms = Date.now() - start;
+  }
+
+  // Errors can arrive with a non-200 status, or inside a 200 body.
+  // Docs: https://openrouter.ai/docs/api-reference/errors
+  if (!res.ok || data?.error || !data?.choices) {
+    const msg = data?.error?.message || `HTTP ${res.status}`;
+    throw Object.assign(new Error(`OpenRouter error ${data?.error?.code ?? res.status}: ${msg}`), { stats });
+  }
+
+  // Usage (tokens and cost) is always included. Docs: https://openrouter.ai/docs/use-cases/usage-accounting
+  stats.servedModel = data.model ?? null;
+  stats.promptTokens = data.usage?.prompt_tokens ?? null;
+  stats.completionTokens = data.usage?.completion_tokens ?? null;
+  stats.costUsd = data.usage?.cost ?? null;
+  stats.provider =
+    data.openrouter_metadata?.endpoints?.available?.find((e) => e.selected)?.provider ??
+    (data.id ? await providerFromGeneration(data.id) : null);
+
+  return { content: data.choices[0]?.message?.content ?? '', stats };
+}
+
+// Strict JSON schema for Layer 1, used only when models.json has "useStructuredOutputs": true.
+// Docs: https://openrouter.ai/docs/features/structured-outputs
+function structuredOutputParams() {
+  const prop = (values) => ({ type: 'string', enum: values });
+  return {
+    response_format: {
+      type: 'json_schema',
+      json_schema: {
+        name: 'ticket_classification',
+        strict: true,
+        schema: {
+          type: 'object',
+          properties: {
+            category: prop(ALLOWED.category),
+            urgency: prop(ALLOWED.urgency),
+            sentiment: prop(ALLOWED.sentiment),
+          },
+          required: ['category', 'urgency', 'sentiment'],
+          additionalProperties: false,
+        },
+      },
+    },
+    // Only route to providers that support response_format.
+    // Docs: https://openrouter.ai/docs/features/provider-routing
+    provider: { require_parameters: true },
+  };
+}
+
+// Live call, or a fake one in fake mode. fakeContent is only evaluated in fake mode.
+function callModel({ model, messages, temperature, extra, fakeContent }) {
+  return FAKE
+    ? fakeCall(model, temperature, messages, fakeContent())
+    : openrouterChat({ model, messages, temperature, extra });
+}
+
 // ---------- Handlers ----------
 
 async function checkModel(model) {
@@ -151,10 +282,20 @@ async function handleClassify({ ticket, model }) {
   const cfg = await checkModel(model);
   const temperature = cfg.temperature?.layer1 ?? 0;
   const messages = classifyMessages(ticket);
-  const content = model === FAKE_INVALID_MODEL ? FAKE_INVALID_OUTPUT
-    : model === FAKE_RECOVERABLE_MODEL ? fakeRecoverableOutput(fakeClassification(ticket))
-    : JSON.stringify(fakeClassification(ticket));
-  const result = await fakeCall(model, temperature, messages, content);
+  let result;
+  try {
+    result = await callModel({
+      model,
+      messages,
+      temperature,
+      extra: cfg.useStructuredOutputs ? structuredOutputParams() : {},
+      fakeContent: () => model === FAKE_INVALID_MODEL ? FAKE_INVALID_OUTPUT
+        : model === FAKE_RECOVERABLE_MODEL ? fakeRecoverableOutput(fakeClassification(ticket))
+        : JSON.stringify(fakeClassification(ticket)),
+    });
+  } catch (err) {
+    return { ok: false, error: err.message, stats: err.stats };
+  }
   const v = validateClassification(result.content);
   if (v.ok) return { ok: true, parsed: v.parsed, raw: result.content, stats: result.stats };
   return {
@@ -175,13 +316,25 @@ async function handleReply({ ticket, classification, model }) {
   const cfg = await checkModel(model);
   const temperature = cfg.temperature?.layer2 ?? 0.7;
   const messages = replyMessages(ticket, v.parsed);
-  const result = await fakeCall(model, temperature, messages, fakeReply(v.parsed));
+  let result;
+  try {
+    result = await callModel({ model, messages, temperature, fakeContent: () => fakeReply(v.parsed) });
+  } catch (err) {
+    return { ok: false, error: err.message, stats: err.stats };
+  }
+  if (!result.content.trim()) return { ok: false, error: 'The model returned an empty reply.', stats: result.stats };
   return { ok: true, text: result.content, stats: result.stats };
 }
 
 async function configPayload() {
   const cfg = await loadConfig();
-  const models = cfg.models.map((id) => ({ id, name: id }));
+  const cat = await getCatalogue();
+  // found: false flags IDs that aren't in OpenRouter's catalogue (typos, placeholders).
+  const models = cfg.models.map((id) => ({
+    id,
+    name: cat.get(id)?.name ?? id,
+    found: FAKE || cat.size === 0 ? null : cat.has(id),
+  }));
   if (FAKE) models.push(...FAKE_MODELS);
   return { fake: FAKE, models, defaults: cfg.defaults, temperature: cfg.temperature, samples: SAMPLES };
 }
@@ -216,6 +369,6 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`Ticket triager running at http://${HOST}:${PORT}`);
-  console.log(`Mode: ${FAKE ? 'FAKE (no OpenRouter calls)' : 'LIVE'}`);
+  console.log(`Mode: ${FAKE ? 'FAKE (no OpenRouter calls)' : 'LIVE (real OpenRouter calls, which cost credits)'}`);
   console.log(`OpenRouter API key: ${process.env.OPENROUTER_API_KEY ? 'found in environment' : 'not found'}`);
 });

@@ -18,7 +18,7 @@ cp .env.example .env      # then paste your OpenRouter API key into .env
 npm start
 ```
 
-Open http://127.0.0.1:3000. The server only listens on your own machine. Without a key, the app runs in fake mode with canned responses.
+Open http://127.0.0.1:3000. The server only listens on your own machine. Without a key, the app runs in fake mode with canned responses. You can force fake mode with a key present: `FAKE=1 npm start`. Restart the server after changing `.env`.
 
 Your API key stays in the server process. The browser never sees it, and `.env` is git-ignored.
 
@@ -41,6 +41,22 @@ Edit `models.json`:
 - `useStructuredOutputs`: when true, Layer 1 asks OpenRouter to enforce the JSON schema.
 
 Save the file and refresh the page. You don't need to restart the server.
+
+A model ID that isn't in OpenRouter's catalogue shows as "⚠ … (not in OpenRouter catalogue)" in the dropdowns.
+
+## What each stat means
+
+| Stat | Source |
+|---|---|
+| Model | The model ID you picked. "Served as" appears if OpenRouter reports a different model in the response's `model` field. |
+| Provider | The provider OpenRouter routed the request to, from [router metadata](https://openrouter.ai/docs/guides/features/router-metadata) (`X-OpenRouter-Metadata: enabled`). If that's missing, it falls back to [generation stats](https://openrouter.ai/docs/api-reference/get-a-generation). |
+| Tokens | `usage.prompt_tokens` / `usage.completion_tokens`, counted with the model's own tokenizer ([usage accounting](https://openrouter.ai/docs/use-cases/usage-accounting)) |
+| Cost | `usage.cost`, in dollars. OpenRouter credits use US dollars as their base currency. |
+| Time | Wall-clock time of the API call, measured by the local server |
+| Temp | The temperature sent. It's flagged when the model's catalogue entry doesn't list `temperature` as supported. |
+| Format | Shown when `useStructuredOutputs` is on ([structured outputs](https://openrouter.ai/docs/features/structured-outputs)) |
+
+Layer 1 output must be exactly a JSON object with the allowed values. Anything else is labelled **Invalid format**. If it would pass after removing code fences or lowercasing values, the label adds "(recoverable: …)". Either way, Layer 2 is skipped.
 
 ## Where to change the prompts
 

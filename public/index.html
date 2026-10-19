@@ -85,6 +85,11 @@ function modelLabel(id) {
   return !m || m.name === m.id ? id : `${m.name} (${m.id})`;
 }
 
+// Dropdown text: also flags IDs that OpenRouter's catalogue doesn't know.
+function optionLabel(m) {
+  return m.found === false ? `⚠ ${m.id} (not in OpenRouter catalogue)` : modelLabel(m.id);
+}
+
 function fmtUsd(c) {
   if (c == null) return 'n/a';
   if (c === 0) return '$0';
@@ -94,7 +99,8 @@ function fmtUsd(c) {
 
 async function init() {
   config = await (await fetch('/api/config')).json();
-  $('#banner').hidden = !config.fake;
+  if (!config.fake) $('#banner').textContent = 'Live mode: each run makes real OpenRouter calls and costs credits.';
+  $('#banner').hidden = false;
   for (const s of config.samples) {
     const b = el('button', { type: 'button', class: 'sample', title: `Expected: ${s.expected}` }, s.label);
     b.onclick = () => { $('#ticket').value = s.text; };
@@ -105,7 +111,7 @@ async function init() {
 }
 
 function fillSelect(sel, def) {
-  sel.replaceChildren(...config.models.map((m) => new Option(modelLabel(m.id), m.id, false, m.id === def)));
+  sel.replaceChildren(...config.models.map((m) => new Option(optionLabel(m), m.id, false, m.id === def)));
 }
 
 async function post(url, body) {
@@ -127,12 +133,13 @@ function renderStats(stats) {
     : stats.temperature;
   return el('div', { class: 'stats' },
     item('Model', modelLabel(stats.requestedModel)),
-    stats.servedModel && stats.servedModel !== stats.requestedModel ? item('Served by', stats.servedModel) : null,
+    stats.servedModel && stats.servedModel !== stats.requestedModel ? item('Served as', stats.servedModel) : null,
     item('Provider', stats.provider ?? 'unknown'),
     item('Tokens', `${stats.promptTokens ?? '?'} in / ${stats.completionTokens ?? '?'} out`),
     item('Cost', fmtUsd(stats.costUsd)),
-    item('Time', `${stats.ms} ms`),
+    item('Time', stats.ms == null ? '?' : `${stats.ms} ms`),
     item('Temp', temp),
+    stats.structuredOutputs ? item('Format', 'JSON schema enforced') : null,
   );
 }
 

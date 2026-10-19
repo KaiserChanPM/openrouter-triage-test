@@ -54,6 +54,12 @@ Switch to **Compare models** at the top of the page. Pick a **Reference** model 
 - **End-to-end**: who handles the ticket best from start to finish? Each model classifies the ticket itself, then writes its reply from its own classification, mistakes included.
 - Layer 1 fields that differ from the Reference are highlighted. 💲 marks the cheapest and ⚡ the fastest successful result in each row.
 
+## Backup models and zero data retention
+
+- **Backup model** (Single run only): pick an optional backup for each layer. The app sends OpenRouter a `models: [main, backup]` array ([model fallbacks](https://openrouter.ai/docs/guides/routing/model-fallbacks)). If the main model fails, the backup answers and is billed, and the cell shows "Fallback used". A mistyped model ID is rejected outright, and the backup isn't tried.
+- **Zero data retention (ZDR) only** (both views): sends `provider: { zdr: true }` ([provider routing](https://openrouter.ai/docs/features/provider-routing), [ZDR](https://openrouter.ai/docs/guides/features/zdr)), so only providers that don't retain your data are used. A model with no ZDR provider returns "No endpoints found matching your data policy". The per-request flag can only add the restriction; it can't override your account's privacy settings.
+- **Demo:** turn on ZDR, set Layer 1 to the free Nemotron model and its backup to DeepSeek V4.1 Flash. Nemotron has no ZDR provider, so OpenRouter falls back to DeepSeek.
+
 ## What each stat means
 
 | Stat | Source |

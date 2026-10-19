@@ -40,6 +40,10 @@
   .cmode legend { font-weight: 600; font-size: 13px; padding: 0 4px; }
   .cmode label { display: block; padding: 3px 0; cursor: pointer; }
   .hint { color: var(--muted); font-size: 13px; }
+  .controls .full { grid-column: 1 / -1; }
+  .options { margin-top: 12px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; }
+  .options label { cursor: pointer; }
+  .fallback { background: #fdecc8; color: #7a4100; border: 1px solid #f0c36d; border-radius: 6px; padding: 6px 10px; margin-bottom: 8px; font-weight: 600; font-size: 13px; }
   .run-row { margin-top: 12px; text-align: right; }
   .run { background: var(--accent); color: #fff; border: 0; padding: 8px 22px; font-weight: 600; }
   .run:disabled { opacity: .5; cursor: wait; }
@@ -96,6 +100,9 @@
     <div id="single-controls" class="controls two">
       <div><label class="lbl" for="model1">Layer 1 model (classify)</label><select id="model1"></select></div>
       <div><label class="lbl" for="model2">Layer 2 model (draft reply)</label><select id="model2"></select></div>
+      <div><label class="lbl" for="backup1">Layer 1 backup (optional)</label><select id="backup1"></select></div>
+      <div><label class="lbl" for="backup2">Layer 2 backup (optional)</label><select id="backup2"></select></div>
+      <div class="hint full">If the main model fails (an error, an outage, no provider that fits your settings), OpenRouter retries with the backup. Backups apply to Single run only, so compare columns always show the model named in their header.</div>
     </div>
 
     <div id="compare-controls" hidden>
@@ -111,6 +118,11 @@
         <label><input type="radio" name="cmode" value="e2e"> <b>End-to-end</b>: who handles the ticket best from start to finish?
           <span class="hint"><br>Each model classifies the ticket itself, then writes its reply from <i>its own</i> classification, mistakes included.</span></label>
       </fieldset>
+    </div>
+
+    <div class="options">
+      <label><input type="checkbox" id="zdr"> <b>Zero data retention (ZDR) only</b></label>
+      <div class="hint">Only route to providers that don't keep your prompts and outputs. Models with no ZDR provider return an error instead of running. Applies to both views.</div>
     </div>
 
     <div class="run-row"><button id="run" class="run" type="button">Run</button></div>
@@ -172,13 +184,17 @@ async function init() {
   }
   fillSelect($('#model1'), config.defaults?.layer1);
   fillSelect($('#model2'), config.defaults?.layer2);
+  fillSelect($('#backup1'), '', true, true);
+  fillSelect($('#backup2'), '', true, true);
   fillSelect($('#slot0'), config.defaults?.layer1);
   fillSelect($('#slot1'), '', true);
   fillSelect($('#slot2'), '', true);
 }
 
-function fillSelect(sel, def, optional = false) {
-  const options = config.models.map((m) => new Option(optionLabel(m), m.id, false, m.id === def));
+// realOnly: leave out the local test models (backups are sent to OpenRouter).
+function fillSelect(sel, def, optional = false, realOnly = false) {
+  const models = realOnly ? config.models.filter((m) => !m.id.startsWith('fake/')) : config.models;
+  const options = models.map((m) => new Option(optionLabel(m), m.id, false, m.id === def));
   if (optional) options.unshift(new Option('(none)', '', false, !def));
   sel.replaceChildren(...options);
 }
@@ -210,7 +226,18 @@ function renderStats(stats) {
     item('Time', stats.ms == null ? '?' : `${stats.ms} ms`),
     item('Temp', temp),
     stats.structuredOutputs ? item('Format', 'JSON schema enforced') : null,
+    stats.zdr ? item('ZDR', 'on') : null,
+    stats.backupModel && !stats.fallbackUsed
+      ? item('Backup', `${modelLabel(stats.backupModel)} ${stats.servedModel ? '(not needed)' : '(no model could answer)'}`)
+      : null,
   );
+}
+
+// Prominent notice when OpenRouter fell back to the backup model.
+function fallbackNotice(stats) {
+  if (!stats?.fallbackUsed) return null;
+  return el('div', { class: 'fallback' },
+    `Fallback used: ${modelLabel(stats.requestedModel)} failed, so the backup ${modelLabel(stats.backupModel)} answered (and was billed).`);
 }
 
 function renderLoading(cell, text) {
@@ -221,10 +248,12 @@ function renderL1(cell, r) {
   if (r.ok) {
     const field = (k, v) => el('div', { class: 'field', 'data-field': k }, el('div', { class: 'k' }, k), el('div', { class: 'v' }, v));
     cell.replaceChildren(
+      fallbackNotice(r.stats) ?? '',
       el('div', { class: 'fields' }, ...FIELDS.map((f) => field(f, r.parsed[f]))),
       renderStats(r.stats));
   } else if (r.invalidFormat) {
     cell.replaceChildren(
+      fallbackNotice(r.stats) ?? '',
       el('span', { class: 'badge-bad' }, r.recoverable ? `Invalid format (recoverable: ${r.recoverable})` : 'Invalid format'),
       ' ', el('span', {}, r.reason),
       el('pre', { class: 'raw' }, r.raw),
@@ -235,7 +264,7 @@ function renderL1(cell, r) {
 }
 
 function renderL2(cell, r) {
-  if (r.ok) cell.replaceChildren(el('div', { class: 'reply' }, r.text), renderStats(r.stats));
+  if (r.ok) cell.replaceChildren(fallbackNotice(r.stats) ?? '', el('div', { class: 'reply' }, r.text), renderStats(r.stats));
   else cell.replaceChildren(el('div', { class: 'error' }, r.error || 'Unknown error'), renderStats(r.stats));
 }
 
@@ -254,14 +283,16 @@ function skipReason(r1) {
 
 async function runSingle(ticket) {
   const m1 = $('#model1').value, m2 = $('#model2').value;
+  const b1 = $('#backup1').value || null, b2 = $('#backup2').value || null;
+  const zdr = $('#zdr').checked;
   $('#results').hidden = false;
   renderLoading($('#l1'), `Running on ${modelLabel(m1)}…`);
   renderLoading($('#l2'), `Waiting for Layer 1…`);
-  const r1 = await post('/api/classify', { ticket, model: m1 });
+  const r1 = await post('/api/classify', { ticket, model: m1, backup: b1, zdr });
   renderL1($('#l1'), r1);
   if (!r1.ok) return renderSkipped($('#l2'), skipReason(r1));
   renderLoading($('#l2'), `Running on ${modelLabel(m2)}…`);
-  renderL2($('#l2'), await post('/api/reply', { ticket, classification: r1.parsed, model: m2 }));
+  renderL2($('#l2'), await post('/api/reply', { ticket, classification: r1.parsed, model: m2, backup: b2, zdr }));
 }
 
 // ---------- Compare ----------
@@ -290,7 +321,8 @@ function buildGrid(slots, mode) {
 async function runCompare(ticket) {
   const slots = SLOT_NAMES.map((name, i) => ({ name, model: $('#slot' + i).value })).filter((s) => s.model);
   const mode = document.querySelector('input[name=cmode]:checked').value;
-  $('#mode-label').textContent = MODE_TEXT[mode][0];
+  const zdr = $('#zdr').checked;
+  $('#mode-label').textContent = MODE_TEXT[mode][0] + (zdr ? ' · ZDR only' : '');
   $('#mode-hint').textContent = MODE_TEXT[mode][1];
   $('#compare-results').hidden = false;
 
@@ -301,12 +333,12 @@ async function runCompare(ticket) {
   });
 
   // Layer 1 runs on every slot, in parallel.
-  const l1 = slots.map((s, i) => post('/api/classify', { ticket, model: s.model })
+  const l1 = slots.map((s, i) => post('/api/classify', { ticket, model: s.model, zdr })
     .then((r) => { renderL1(l1Cells[i], r); return r; }));
 
   const runReply = (i, classification) => {
     renderLoading(l2Cells[i], 'Running…');
-    return post('/api/reply', { ticket, classification, model: slots[i].model })
+    return post('/api/reply', { ticket, classification, model: slots[i].model, zdr })
       .then((r) => { renderL2(l2Cells[i], r); return r; });
   };
 

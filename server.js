@@ -179,9 +179,25 @@ async function providerFromGeneration(id) {
 
 // One chat completion. Returns { content, stats }, or throws an Error carrying .stats.
 // Docs: https://openrouter.ai/docs/api/api-reference/chat/send-chat-completion-request
-async function openrouterChat({ model, messages, temperature, extra = {} }) {
+async function openrouterChat({ model, backup, zdr, structured, messages, temperature }) {
   const cat = await getCatalogue();
-  const entry = cat.get(model);
+  const supportsTemp = (id) => {
+    const entry = cat.get(id);
+    return entry ? (entry.supported_parameters ?? []).includes('temperature') : null; // null = unknown
+  };
+
+  const body = { messages, temperature };
+  // Backup model: send a `models` array (primary first) instead of `model`.
+  // Docs: https://openrouter.ai/docs/guides/routing/model-fallbacks
+  if (backup) body.models = [model, backup];
+  else body.model = model;
+  if (structured) body.response_format = classificationSchema();
+  // Provider preferences. Docs: https://openrouter.ai/docs/features/provider-routing
+  const provider = {};
+  if (zdr) provider.zdr = true; // only Zero Data Retention endpoints
+  if (structured) provider.require_parameters = true; // only providers that support response_format
+  if (Object.keys(provider).length) body.provider = provider;
+
   const stats = {
     requestedModel: model,
     servedModel: null,
@@ -192,9 +208,11 @@ async function openrouterChat({ model, messages, temperature, extra = {} }) {
     costUsd: null,
     ms: null,
     temperature,
-    // null = unknown (model not found in catalogue)
-    temperatureSupported: entry ? (entry.supported_parameters ?? []).includes('temperature') : null,
-    structuredOutputs: Boolean(extra.response_format),
+    temperatureSupported: supportsTemp(model),
+    structuredOutputs: Boolean(structured),
+    zdr: Boolean(zdr),
+    backupModel: backup || null,
+    fallbackUsed: false,
   };
 
   const start = Date.now();
@@ -210,7 +228,7 @@ async function openrouterChat({ model, messages, temperature, extra = {} }) {
         'X-OpenRouter-Metadata': 'enabled',
         'X-OpenRouter-Title': 'openrouter-triage-test',
       },
-      body: JSON.stringify({ model, messages, temperature, ...extra }),
+      body: JSON.stringify(body),
     });
     data = await res.json().catch(() => null);
   } finally {
@@ -226,6 +244,11 @@ async function openrouterChat({ model, messages, temperature, extra = {} }) {
 
   // Usage (tokens and cost) is always included. Docs: https://openrouter.ai/docs/use-cases/usage-accounting
   stats.servedModel = data.model ?? null;
+  // The response `model` names the model that actually answered (and was billed).
+  if (backup && stats.servedModel && stats.servedModel !== model && stats.servedModel.startsWith(backup)) {
+    stats.fallbackUsed = true;
+    stats.temperatureSupported = supportsTemp(backup);
+  }
   stats.promptTokens = data.usage?.prompt_tokens ?? null;
   stats.completionTokens = data.usage?.completion_tokens ?? null;
   // Hidden "thinking" tokens, if the model reports them.
@@ -240,60 +263,61 @@ async function openrouterChat({ model, messages, temperature, extra = {} }) {
 
 // Strict JSON schema for Layer 1, used only when models.json has "useStructuredOutputs": true.
 // Docs: https://openrouter.ai/docs/features/structured-outputs
-function structuredOutputParams() {
+function classificationSchema() {
   const prop = (values) => ({ type: 'string', enum: values });
   return {
-    response_format: {
-      type: 'json_schema',
-      json_schema: {
-        name: 'ticket_classification',
-        strict: true,
-        schema: {
-          type: 'object',
-          properties: {
-            category: prop(ALLOWED.category),
-            urgency: prop(ALLOWED.urgency),
-            sentiment: prop(ALLOWED.sentiment),
-          },
-          required: ['category', 'urgency', 'sentiment'],
-          additionalProperties: false,
+    type: 'json_schema',
+    json_schema: {
+      name: 'ticket_classification',
+      strict: true,
+      schema: {
+        type: 'object',
+        properties: {
+          category: prop(ALLOWED.category),
+          urgency: prop(ALLOWED.urgency),
+          sentiment: prop(ALLOWED.sentiment),
         },
+        required: ['category', 'urgency', 'sentiment'],
+        additionalProperties: false,
       },
     },
-    // Only route to providers that support response_format.
-    // Docs: https://openrouter.ai/docs/features/provider-routing
-    provider: { require_parameters: true },
   };
 }
 
 // Live call, or a fake one in fake mode or for a local test model. fakeContent is only evaluated for fake calls.
-function callModel({ model, messages, temperature, extra, fakeContent }) {
-  return FAKE || isFakeModel(model)
-    ? fakeCall(model, temperature, messages, fakeContent())
-    : openrouterChat({ model, messages, temperature, extra });
+// opts: { model, backup, zdr, structured, messages, temperature }
+async function callModel({ fakeContent, ...opts }) {
+  if (!FAKE && !isFakeModel(opts.model)) return openrouterChat(opts);
+  const result = await fakeCall(opts.model, opts.temperature, opts.messages, fakeContent());
+  Object.assign(result.stats, { zdr: Boolean(opts.zdr), backupModel: null, fallbackUsed: false });
+  return result;
 }
 
 // ---------- Handlers ----------
 
-async function checkModel(model) {
+async function checkModel(model, backup) {
   const cfg = await loadConfig();
   const allowed = [...cfg.models, ...FAKE_MODELS.map((m) => m.id)];
   if (!allowed.includes(model)) throw new Error(`Model "${model}" is not in models.json.`);
+  // Backups go to OpenRouter, so they must be real models from models.json.
+  if (backup && !cfg.models.includes(backup)) throw new Error(`Backup model "${backup}" is not in models.json.`);
   return cfg;
 }
 
-async function handleClassify({ ticket, model }) {
+async function handleClassify({ ticket, model, backup, zdr }) {
   if (!ticket?.trim()) return { ok: false, error: 'Ticket is empty.' };
-  const cfg = await checkModel(model);
+  const cfg = await checkModel(model, backup);
   const temperature = cfg.temperature?.layer1 ?? 0;
   const messages = classifyMessages(ticket);
   let result;
   try {
     result = await callModel({
       model,
+      backup,
+      zdr,
+      structured: Boolean(cfg.useStructuredOutputs),
       messages,
       temperature,
-      extra: cfg.useStructuredOutputs ? structuredOutputParams() : {},
       fakeContent: () => model === FAKE_INVALID_MODEL ? FAKE_INVALID_OUTPUT
         : model === FAKE_RECOVERABLE_MODEL ? fakeRecoverableOutput(fakeClassification(ticket))
         : JSON.stringify(fakeClassification(ticket)),
@@ -313,17 +337,17 @@ async function handleClassify({ ticket, model }) {
   };
 }
 
-async function handleReply({ ticket, classification, model }) {
+async function handleReply({ ticket, classification, model, backup, zdr }) {
   if (!ticket?.trim()) return { ok: false, error: 'Ticket is empty.' };
   // Never draft a reply from an invalid classification.
   const v = validateClassification(JSON.stringify(classification ?? null));
   if (!v.ok) return { ok: false, error: 'Layer 2 skipped: no valid Layer 1 classification.' };
-  const cfg = await checkModel(model);
+  const cfg = await checkModel(model, backup);
   const temperature = cfg.temperature?.layer2 ?? 0.7;
   const messages = replyMessages(ticket, v.parsed);
   let result;
   try {
-    result = await callModel({ model, messages, temperature, fakeContent: () => fakeReply(v.parsed) });
+    result = await callModel({ model, backup, zdr, messages, temperature, fakeContent: () => fakeReply(v.parsed) });
   } catch (err) {
     return { ok: false, error: err.message, stats: err.stats };
   }

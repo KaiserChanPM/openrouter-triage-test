@@ -8,40 +8,72 @@
   :root {
     --bg: #f6f7f9; --card: #fff; --text: #1b1d21; --muted: #646a73; --border: #dde0e4;
     --accent: #2459d6; --bad: #b42318; --bad-bg: #fef3f2; --warn: #8a4b00; --warn-bg: #fff8e6;
-    --ok-bg: #eef4ff;
+    --ok-bg: #eef4ff; --diff-bg: #ffe9a8; --diff-border: #d49b00;
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
-  main { max-width: 960px; margin: 0 auto; padding: 24px 16px 64px; }
+  main { max-width: 1200px; margin: 0 auto; padding: 24px 16px 64px; }
   h1 { font-size: 22px; margin: 0; }
   .sub { color: var(--muted); margin: 2px 0 16px; }
   .banner { background: var(--warn-bg); color: var(--warn); border: 1px solid #f3d9a4; padding: 8px 12px; border-radius: 6px; margin-bottom: 16px; }
   .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
   .card h2 { font-size: 15px; margin: 0 0 10px; }
-  label { font-weight: 600; font-size: 13px; display: block; margin-bottom: 4px; }
+  label.lbl { font-weight: 600; font-size: 13px; display: block; margin-bottom: 4px; }
   textarea { width: 100%; min-height: 130px; font: inherit; padding: 10px; border: 1px solid var(--border); border-radius: 6px; resize: vertical; }
   select { font: inherit; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; width: 100%; background: #fff; }
   button { font: inherit; cursor: pointer; border-radius: 6px; }
+
+  .views { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 16px; background: #fff; }
+  .views label { padding: 6px 16px; cursor: pointer; font-weight: 600; font-size: 14px; }
+  .views input { position: absolute; opacity: 0; pointer-events: none; }
+  .views label:has(input:checked) { background: var(--accent); color: #fff; }
+  .views label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -4px; }
+
   .samples { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
   .sample { background: #fff; border: 1px solid var(--border); padding: 4px 10px; font-size: 13px; }
   .sample:hover { border-color: var(--accent); color: var(--accent); }
-  .controls { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end; margin-top: 12px; }
+  .controls { display: grid; gap: 12px; margin-top: 12px; }
+  .controls.two { grid-template-columns: 1fr 1fr; }
+  .controls.three { grid-template-columns: 1fr 1fr 1fr; }
+  .cmode { border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; margin: 12px 0 0; }
+  .cmode legend { font-weight: 600; font-size: 13px; padding: 0 4px; }
+  .cmode label { display: block; padding: 3px 0; cursor: pointer; }
+  .hint { color: var(--muted); font-size: 13px; }
+  .run-row { margin-top: 12px; text-align: right; }
   .run { background: var(--accent); color: #fff; border: 0; padding: 8px 22px; font-weight: 600; }
   .run:disabled { opacity: .5; cursor: wait; }
+
   .fields { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-  .field { background: var(--ok-bg); border-radius: 6px; padding: 6px 10px; }
+  .field { background: var(--ok-bg); border-radius: 6px; padding: 6px 10px; border: 2px solid transparent; }
   .field .k { font-size: 12px; color: var(--muted); }
   .field .v { font-weight: 600; }
+  .field.diff { background: var(--diff-bg); border-color: var(--diff-border); }
   .badge-bad { display: inline-block; background: var(--bad); color: #fff; font-weight: 700; font-size: 12px; padding: 2px 8px; border-radius: 4px; }
-  .error { background: var(--bad-bg); color: var(--bad); border-radius: 6px; padding: 8px 10px; }
+  .error { background: var(--bad-bg); color: var(--bad); border-radius: 6px; padding: 8px 10px; word-break: break-word; }
   .skipped { background: var(--warn-bg); color: var(--warn); border-radius: 6px; padding: 8px 10px; }
   pre.raw { background: #f2f3f5; border-radius: 6px; padding: 8px 10px; white-space: pre-wrap; word-break: break-word; font-size: 13px; margin: 8px 0 0; }
   .reply { white-space: pre-wrap; }
   .loading { color: var(--muted); font-style: italic; }
   .stats { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); font-size: 12.5px; color: var(--muted); }
   .stats b { color: var(--text); font-weight: 600; }
+
+  /* Compare grid */
+  .mode-label { font-weight: 600; margin-bottom: 4px; }
+  .grid-wrap { overflow-x: auto; }
+  table.grid { width: 100%; border-collapse: separate; border-spacing: 8px; table-layout: fixed; min-width: 640px; }
+  table.grid th, table.grid td { vertical-align: top; text-align: left; }
+  table.grid thead th { padding: 4px 2px; }
+  table.grid th.rowh { width: 96px; font-size: 13px; color: var(--muted); padding-top: 12px; }
+  table.grid td { border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: #fff; }
+  table.grid td .fields { grid-template-columns: 1fr; gap: 6px; }
+  .colname { font-size: 14px; word-break: break-word; }
+  .badge-ref { display: inline-block; margin-top: 4px; background: var(--accent); color: #fff; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 4px; }
+  .marks { display: flex; gap: 6px; margin-bottom: 8px; }
+  .mark { background: #e8f6ec; color: #1d6b35; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 4px; }
+
   @media (max-width: 640px) {
-    .controls, .fields { grid-template-columns: 1fr; }
+    .controls.two, .controls.three, .fields { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -51,25 +83,55 @@
   <p class="sub">A learning tool for testing and switching AI models on OpenRouter.</p>
   <div id="banner" class="banner" hidden>Fake mode: results are canned, and no OpenRouter calls are made.</div>
 
+  <div class="views" role="radiogroup" aria-label="View">
+    <label><input type="radio" name="view" value="single" checked> Single run</label>
+    <label><input type="radio" name="view" value="compare"> Compare models</label>
+  </div>
+
   <section class="card">
-    <label for="ticket">Support ticket</label>
+    <label class="lbl" for="ticket">Support ticket</label>
     <div id="samples" class="samples"></div>
     <textarea id="ticket" placeholder="Paste a customer support ticket, or pick a sample above."></textarea>
-    <div class="controls">
-      <div><label for="model1">Layer 1 model (classify)</label><select id="model1"></select></div>
-      <div><label for="model2">Layer 2 model (draft reply)</label><select id="model2"></select></div>
-      <button id="run" class="run" type="button">Run</button>
+
+    <div id="single-controls" class="controls two">
+      <div><label class="lbl" for="model1">Layer 1 model (classify)</label><select id="model1"></select></div>
+      <div><label class="lbl" for="model2">Layer 2 model (draft reply)</label><select id="model2"></select></div>
     </div>
+
+    <div id="compare-controls" hidden>
+      <div class="controls three">
+        <div><label class="lbl" for="slot0">Reference (required)</label><select id="slot0"></select></div>
+        <div><label class="lbl" for="slot1">Model 2 (optional)</label><select id="slot1"></select></div>
+        <div><label class="lbl" for="slot2">Model 3 (optional)</label><select id="slot2"></select></div>
+      </div>
+      <fieldset class="cmode">
+        <legend>Compare mode</legend>
+        <label><input type="radio" name="cmode" value="fair" checked> <b>Fair layer test</b>
+          <span class="hint">: every model's reply uses the Reference classification, so replies differ only because of the model.</span></label>
+        <label><input type="radio" name="cmode" value="e2e"> <b>End-to-end</b>
+          <span class="hint">: each model runs both layers on its own, comparing whole pipelines.</span></label>
+      </fieldset>
+    </div>
+
+    <div class="run-row"><button id="run" class="run" type="button">Run</button></div>
   </section>
 
   <div id="results" hidden>
     <section class="card"><h2>Layer 1: Classification</h2><div id="l1"></div></section>
     <section class="card"><h2>Layer 2: Draft reply</h2><div id="l2"></div></section>
   </div>
+
+  <section id="compare-results" class="card" hidden>
+    <div id="mode-label" class="mode-label"></div>
+    <div id="mode-hint" class="hint"></div>
+    <div class="grid-wrap"><table id="grid" class="grid"></table></div>
+  </section>
 </main>
 
 <script>
 const $ = (s) => document.querySelector(s);
+const SLOT_NAMES = ['Reference', 'Model 2', 'Model 3'];
+const FIELDS = ['category', 'urgency', 'sentiment'];
 let config;
 
 // Tiny DOM helper: el('div', {class: 'x'}, 'text', childEl)
@@ -80,9 +142,11 @@ function el(tag, attrs = {}, ...children) {
   return node;
 }
 
+const modelName = (id) => config.models.find((x) => x.id === id)?.name ?? id;
+
 function modelLabel(id) {
-  const m = config.models.find((x) => x.id === id);
-  return !m || m.name === m.id ? id : `${m.name} (${m.id})`;
+  const name = modelName(id);
+  return name === id ? id : `${name} (${id})`;
 }
 
 // Dropdown text: also flags IDs that OpenRouter's catalogue doesn't know.
@@ -108,10 +172,15 @@ async function init() {
   }
   fillSelect($('#model1'), config.defaults?.layer1);
   fillSelect($('#model2'), config.defaults?.layer2);
+  fillSelect($('#slot0'), config.defaults?.layer1);
+  fillSelect($('#slot1'), '', true);
+  fillSelect($('#slot2'), '', true);
 }
 
-function fillSelect(sel, def) {
-  sel.replaceChildren(...config.models.map((m) => new Option(optionLabel(m), m.id, false, m.id === def)));
+function fillSelect(sel, def, optional = false) {
+  const options = config.models.map((m) => new Option(optionLabel(m), m.id, false, m.id === def));
+  if (optional) options.unshift(new Option('(none)', '', false, !def));
+  sel.replaceChildren(...options);
 }
 
 async function post(url, body) {
@@ -123,7 +192,7 @@ async function post(url, body) {
   }
 }
 
-// ---------- Renderers (reused by compare mode later) ----------
+// ---------- Renderers (shared by both views) ----------
 
 function renderStats(stats) {
   if (!stats) return null;
@@ -131,11 +200,12 @@ function renderStats(stats) {
   const temp = stats.temperatureSupported === false
     ? `${stats.temperature} (not supported by this model; likely ignored)`
     : stats.temperature;
+  const reasoning = stats.reasoningTokens ? ` (${stats.reasoningTokens} reasoning)` : '';
   return el('div', { class: 'stats' },
     item('Model', modelLabel(stats.requestedModel)),
     stats.servedModel && stats.servedModel !== stats.requestedModel ? item('Served as', stats.servedModel) : null,
     item('Provider', stats.provider ?? 'unknown'),
-    item('Tokens', `${stats.promptTokens ?? '?'} in / ${stats.completionTokens ?? '?'} out`),
+    item('Tokens', `${stats.promptTokens ?? '?'} in / ${stats.completionTokens ?? '?'} out${reasoning}`),
     item('Cost', fmtUsd(stats.costUsd)),
     item('Time', stats.ms == null ? '?' : `${stats.ms} ms`),
     item('Temp', temp),
@@ -143,16 +213,15 @@ function renderStats(stats) {
   );
 }
 
-function renderLoading(cell, model) {
-  cell.replaceChildren(el('div', { class: 'loading' }, `Running on ${modelLabel(model)}…`));
+function renderLoading(cell, text) {
+  cell.replaceChildren(el('div', { class: 'loading' }, text));
 }
 
 function renderL1(cell, r) {
   if (r.ok) {
     const field = (k, v) => el('div', { class: 'field', 'data-field': k }, el('div', { class: 'k' }, k), el('div', { class: 'v' }, v));
     cell.replaceChildren(
-      el('div', { class: 'fields' },
-        field('category', r.parsed.category), field('urgency', r.parsed.urgency), field('sentiment', r.parsed.sentiment)),
+      el('div', { class: 'fields' }, ...FIELDS.map((f) => field(f, r.parsed[f]))),
       renderStats(r.stats));
   } else if (r.invalidFormat) {
     cell.replaceChildren(
@@ -181,21 +250,145 @@ function skipReason(r1) {
     : `Layer 2 skipped: Layer 1 failed (${r1.error || 'unknown error'}).`;
 }
 
-// ---------- Normal run ----------
+// ---------- Single run ----------
+
+async function runSingle(ticket) {
+  const m1 = $('#model1').value, m2 = $('#model2').value;
+  $('#results').hidden = false;
+  renderLoading($('#l1'), `Running on ${modelLabel(m1)}…`);
+  renderLoading($('#l2'), `Waiting for Layer 1…`);
+  const r1 = await post('/api/classify', { ticket, model: m1 });
+  renderL1($('#l1'), r1);
+  if (!r1.ok) return renderSkipped($('#l2'), skipReason(r1));
+  renderLoading($('#l2'), `Running on ${modelLabel(m2)}…`);
+  renderL2($('#l2'), await post('/api/reply', { ticket, classification: r1.parsed, model: m2 }));
+}
+
+// ---------- Compare ----------
+
+const MODE_TEXT = {
+  fair: ['Mode: Fair layer test',
+    "Layer 1 runs on every model. Layer 2 runs on every model using the Reference model's classification, so replies differ only because of the model."],
+  e2e: ['Mode: End-to-end',
+    'Each column runs both layers with its own model, so you are comparing whole pipelines.'],
+};
+
+function buildGrid(slots, mode) {
+  const header = el('tr', {}, el('th', { class: 'rowh' }),
+    ...slots.map((s, i) => el('th', {},
+      el('div', { class: 'colname' }, el('b', {}, `${s.name}: `), `${modelName(s.model)} (${s.model})`),
+      i === 0 && mode === 'fair' ? el('div', { class: 'badge-ref' }, 'Reference: all replies use this classification') : null)));
+  const l1Cells = slots.map(() => el('td'));
+  const l2Cells = slots.map(() => el('td'));
+  const l2Row = el('tr', {}, el('th', { class: 'rowh' }, 'Layer 2: Draft reply'), ...l2Cells);
+  $('#grid').replaceChildren(
+    el('thead', {}, header),
+    el('tbody', {}, el('tr', {}, el('th', { class: 'rowh' }, 'Layer 1: Classification'), ...l1Cells), l2Row));
+  return { l1Cells, l2Cells, l2Row };
+}
+
+async function runCompare(ticket) {
+  const slots = SLOT_NAMES.map((name, i) => ({ name, model: $('#slot' + i).value })).filter((s) => s.model);
+  const mode = document.querySelector('input[name=cmode]:checked').value;
+  $('#mode-label').textContent = MODE_TEXT[mode][0];
+  $('#mode-hint').textContent = MODE_TEXT[mode][1];
+  $('#compare-results').hidden = false;
+
+  const { l1Cells, l2Cells, l2Row } = buildGrid(slots, mode);
+  slots.forEach((s, i) => {
+    renderLoading(l1Cells[i], 'Running…');
+    renderLoading(l2Cells[i], mode === 'fair' ? 'Waiting for the Reference classification…' : 'Waiting for Layer 1…');
+  });
+
+  // Layer 1 runs on every slot, in parallel.
+  const l1 = slots.map((s, i) => post('/api/classify', { ticket, model: s.model })
+    .then((r) => { renderL1(l1Cells[i], r); return r; }));
+
+  const runReply = (i, classification) => {
+    renderLoading(l2Cells[i], 'Running…');
+    return post('/api/reply', { ticket, classification, model: slots[i].model })
+      .then((r) => { renderL2(l2Cells[i], r); return r; });
+  };
+
+  let l2;
+  if (mode === 'fair') {
+    // Every Layer 2 uses the Reference classification, so only the Reference result gates it.
+    const ref = await l1[0];
+    if (ref.ok) {
+      l2 = slots.map((s, i) => runReply(i, ref.parsed));
+    } else {
+      l2Row.replaceChildren(l2Row.firstChild, el('td', { colspan: slots.length },
+        el('div', { class: 'skipped' },
+          "Reference classification is invalid, so the fair test can't run. Pick another Reference or switch to End-to-end.")));
+      l2 = [];
+    }
+  } else {
+    // Each column's Layer 2 uses its own Layer 1 result.
+    l2 = l1.map((p, i) => p.then((r1) => {
+      if (r1.ok) return runReply(i, r1.parsed);
+      renderSkipped(l2Cells[i], skipReason(r1));
+      return null;
+    }));
+  }
+
+  const r1s = await Promise.all(l1);
+  const r2s = await Promise.all(l2);
+  highlightDisagreements(r1s, l1Cells);
+  markBest(r1s, l1Cells);
+  markBest(r2s, l2Cells);
+}
+
+// Highlight Layer 1 fields where Model 2 or Model 3 differs from the Reference.
+function highlightDisagreements(r1s, cells) {
+  const ref = r1s[0];
+  if (!ref?.ok) return;
+  r1s.forEach((r, i) => {
+    if (i === 0 || !r.ok) return;
+    for (const f of FIELDS) {
+      if (r.parsed[f] === ref.parsed[f]) continue;
+      const node = cells[i].querySelector(`[data-field="${f}"]`);
+      node.classList.add('diff');
+      node.querySelector('.k').append(` ≠ Reference (${ref.parsed[f]})`);
+    }
+  });
+}
+
+// Mark the cheapest and fastest successful result in a row (needs at least two to compare).
+function markBest(results, cells) {
+  const valid = results.map((r, i) => ({ r, i })).filter((x) => x.r?.ok && x.r.stats);
+  if (valid.length < 2) return;
+  const costed = valid.filter((x) => x.r.stats.costUsd != null);
+  const minCost = Math.min(...costed.map((x) => x.r.stats.costUsd));
+  const minMs = Math.min(...valid.map((x) => x.r.stats.ms));
+  for (const { r, i } of valid) {
+    const marks = [];
+    if (costed.length >= 2 && r.stats.costUsd === minCost) marks.push(el('span', { class: 'mark' }, '💲 Cheapest'));
+    if (r.stats.ms === minMs) marks.push(el('span', { class: 'mark' }, '⚡ Fastest'));
+    if (marks.length) cells[i].prepend(el('div', { class: 'marks' }, ...marks));
+  }
+}
+
+// ---------- View switching and Run ----------
+
+const currentView = () => document.querySelector('input[name=view]:checked').value;
+
+for (const input of document.querySelectorAll('input[name=view]')) {
+  input.onchange = () => {
+    const compare = currentView() === 'compare';
+    $('#single-controls').hidden = compare;
+    $('#compare-controls').hidden = !compare;
+    $('#results').hidden = compare || !$('#l1').hasChildNodes();
+    $('#compare-results').hidden = !compare || !$('#grid').hasChildNodes();
+  };
+}
 
 $('#run').onclick = async () => {
   const ticket = $('#ticket').value.trim();
   if (!ticket) { alert('Paste a ticket or pick a sample first.'); return; }
-  const m1 = $('#model1').value, m2 = $('#model2').value;
   $('#run').disabled = true;
-  $('#results').hidden = false;
-  renderLoading($('#l1'), m1);
-  renderLoading($('#l2'), m2);
   try {
-    const r1 = await post('/api/classify', { ticket, model: m1 });
-    renderL1($('#l1'), r1);
-    if (!r1.ok) return renderSkipped($('#l2'), skipReason(r1));
-    renderL2($('#l2'), await post('/api/reply', { ticket, classification: r1.parsed, model: m2 }));
+    if (currentView() === 'compare') await runCompare(ticket);
+    else await runSingle(ticket);
   } finally {
     $('#run').disabled = false;
   }

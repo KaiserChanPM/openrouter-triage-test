@@ -44,13 +44,21 @@ Save the file and refresh the page. You don't need to restart the server.
 
 A model ID that isn't in OpenRouter's catalogue shows as "⚠ … (not in OpenRouter catalogue)" in the dropdowns.
 
+## Compare mode
+
+Switch to **Compare models** at the top of the page. Pick a **Reference** model (required) and up to two more models, then click Run. Results show as a grid: one column per model, with a Layer 1 row and a Layer 2 row. Every cell shows the provider OpenRouter routed that call to, because the same model can be served by different providers on different runs.
+
+- **Fair layer test** (default): Layer 1 runs on every model. Layer 2 runs on every model using the Reference model's classification, so replies differ only because of the model. If the Reference classification is invalid, no replies are drafted.
+- **End-to-end**: each column runs both layers with its own model.
+- Layer 1 fields that differ from the Reference are highlighted. 💲 marks the cheapest and ⚡ the fastest successful result in each row.
+
 ## What each stat means
 
 | Stat | Source |
 |---|---|
 | Model | The model ID you picked. "Served as" appears if OpenRouter reports a different model in the response's `model` field. |
 | Provider | The provider OpenRouter routed the request to, from [router metadata](https://openrouter.ai/docs/guides/features/router-metadata) (`X-OpenRouter-Metadata: enabled`). If that's missing, it falls back to [generation stats](https://openrouter.ai/docs/api-reference/get-a-generation). |
-| Tokens | `usage.prompt_tokens` / `usage.completion_tokens`, counted with the model's own tokenizer ([usage accounting](https://openrouter.ai/docs/use-cases/usage-accounting)) |
+| Tokens | `usage.prompt_tokens` / `usage.completion_tokens`, counted with the model's own tokenizer, plus `completion_tokens_details.reasoning_tokens` when a model reports them ([usage accounting](https://openrouter.ai/docs/use-cases/usage-accounting)) |
 | Cost | `usage.cost`, in dollars. OpenRouter credits use US dollars as their base currency. |
 | Time | Wall-clock time of the API call, measured by the local server |
 | Temp | The temperature sent. It's flagged when the model's catalogue entry doesn't list `temperature` as supported. |

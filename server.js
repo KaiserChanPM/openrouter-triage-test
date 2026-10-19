@@ -186,6 +186,7 @@ async function openrouterChat({ model, messages, temperature, extra = {} }) {
     provider: null,
     promptTokens: null,
     completionTokens: null,
+    reasoningTokens: null,
     costUsd: null,
     ms: null,
     temperature,
@@ -225,6 +226,8 @@ async function openrouterChat({ model, messages, temperature, extra = {} }) {
   stats.servedModel = data.model ?? null;
   stats.promptTokens = data.usage?.prompt_tokens ?? null;
   stats.completionTokens = data.usage?.completion_tokens ?? null;
+  // Hidden "thinking" tokens, if the model reports them.
+  stats.reasoningTokens = data.usage?.completion_tokens_details?.reasoning_tokens ?? null;
   stats.costUsd = data.usage?.cost ?? null;
   stats.provider =
     data.openrouter_metadata?.endpoints?.available?.find((e) => e.selected)?.provider ??

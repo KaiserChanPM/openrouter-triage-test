@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ticket Triager</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --text: #1b1d21; --muted: #646a73; --border: #dde0e4;
+    --accent: #2459d6; --bad: #b42318; --bad-bg: #fef3f2; --warn: #8a4b00; --warn-bg: #fff8e6;
+    --ok-bg: #eef4ff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  main { max-width: 960px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0; }
+  .sub { color: var(--muted); margin: 2px 0 16px; }
+  .banner { background: var(--warn-bg); color: var(--warn); border: 1px solid #f3d9a4; padding: 8px 12px; border-radius: 6px; margin-bottom: 16px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+  .card h2 { font-size: 15px; margin: 0 0 10px; }
+  label { font-weight: 600; font-size: 13px; display: block; margin-bottom: 4px; }
+  textarea { width: 100%; min-height: 130px; font: inherit; padding: 10px; border: 1px solid var(--border); border-radius: 6px; resize: vertical; }
+  select { font: inherit; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; width: 100%; background: #fff; }
+  button { font: inherit; cursor: pointer; border-radius: 6px; }
+  .samples { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .sample { background: #fff; border: 1px solid var(--border); padding: 4px 10px; font-size: 13px; }
+  .sample:hover { border-color: var(--accent); color: var(--accent); }
+  .controls { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end; margin-top: 12px; }
+  .run { background: var(--accent); color: #fff; border: 0; padding: 8px 22px; font-weight: 600; }
+  .run:disabled { opacity: .5; cursor: wait; }
+  .fields { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .field { background: var(--ok-bg); border-radius: 6px; padding: 6px 10px; }
+  .field .k { font-size: 12px; color: var(--muted); }
+  .field .v { font-weight: 600; }
+  .badge-bad { display: inline-block; background: var(--bad); color: #fff; font-weight: 700; font-size: 12px; padding: 2px 8px; border-radius: 4px; }
+  .error { background: var(--bad-bg); color: var(--bad); border-radius: 6px; padding: 8px 10px; }
+  .skipped { background: var(--warn-bg); color: var(--warn); border-radius: 6px; padding: 8px 10px; }
+  pre.raw { background: #f2f3f5; border-radius: 6px; padding: 8px 10px; white-space: pre-wrap; word-break: break-word; font-size: 13px; margin: 8px 0 0; }
+  .reply { white-space: pre-wrap; }
+  .loading { color: var(--muted); font-style: italic; }
+  .stats { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); font-size: 12.5px; color: var(--muted); }
+  .stats b { color: var(--text); font-weight: 600; }
+  @media (max-width: 640px) {
+    .controls, .fields { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Support Ticket Triager</h1>
+  <p class="sub">A learning tool for testing and switching AI models on OpenRouter.</p>
+  <div id="banner" class="banner" hidden>Fake mode: results are canned, and no OpenRouter calls are made.</div>
+
+  <section class="card">
+    <label for="ticket">Support ticket</label>
+    <div id="samples" class="samples"></div>
+    <textarea id="ticket" placeholder="Paste a customer support ticket, or pick a sample above."></textarea>
+    <div class="controls">
+      <div><label for="model1">Layer 1 model (classify)</label><select id="model1"></select></div>
+      <div><label for="model2">Layer 2 model (draft reply)</label><select id="model2"></select></div>
+      <button id="run" class="run" type="button">Run</button>
+    </div>
+  </section>
+
+  <div id="results" hidden>
+    <section class="card"><h2>Layer 1: Classification</h2><div id="l1"></div></section>
+    <section class="card"><h2>Layer 2: Draft reply</h2><div id="l2"></div></section>
+  </div>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+let config;
+
+// Tiny DOM helper: el('div', {class: 'x'}, 'text', childEl)
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  node.append(...children.filter((c) => c != null));
+  return node;
+}
+
+function modelLabel(id) {
+  const m = config.models.find((x) => x.id === id);
+  return !m || m.name === m.id ? id : `${m.name} (${m.id})`;
+}
+
+function fmtUsd(c) {
+  if (c == null) return 'n/a';
+  if (c === 0) return '$0';
+  const decimals = Math.min(10, Math.max(2, Math.ceil(-Math.log10(c)) + 1));
+  return '$' + c.toFixed(decimals);
+}
+
+async function init() {
+  config = await (await fetch('/api/config')).json();
+  $('#banner').hidden = !config.fake;
+  for (const s of config.samples) {
+    const b = el('button', { type: 'button', class: 'sample', title: `Expected: ${s.expected}` }, s.label);
+    b.onclick = () => { $('#ticket').value = s.text; };
+    $('#samples').append(b);
+  }
+  fillSelect($('#model1'), config.defaults?.layer1);
+  fillSelect($('#model2'), config.defaults?.layer2);
+}
+
+function fillSelect(sel, def) {
+  sel.replaceChildren(...config.models.map((m) => new Option(modelLabel(m.id), m.id, false, m.id === def)));
+}
+
+async function post(url, body) {
+  try {
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    return await res.json();
+  } catch (e) {
+    return { ok: false, error: 'Could not reach the local server: ' + e.message };
+  }
+}
+
+// ---------- Renderers (reused by compare mode later) ----------
+
+function renderStats(stats) {
+  if (!stats) return null;
+  const item = (k, v) => el('span', {}, k + ': ', el('b', {}, String(v)));
+  const temp = stats.temperatureSupported === false
+    ? `${stats.temperature} (not supported by this model; likely ignored)`
+    : stats.temperature;
+  return el('div', { class: 'stats' },
+    item('Model', modelLabel(stats.requestedModel)),
+    stats.servedModel && stats.servedModel !== stats.requestedModel ? item('Served by', stats.servedModel) : null,
+    item('Provider', stats.provider ?? 'unknown'),
+    item('Tokens', `${stats.promptTokens ?? '?'} in / ${stats.completionTokens ?? '?'} out`),
+    item('Cost', fmtUsd(stats.costUsd)),
+    item('Time', `${stats.ms} ms`),
+    item('Temp', temp),
+  );
+}
+
+function renderLoading(cell, model) {
+  cell.replaceChildren(el('div', { class: 'loading' }, `Running on ${modelLabel(model)}…`));
+}
+
+function renderL1(cell, r) {
+  if (r.ok) {
+    const field = (k, v) => el('div', { class: 'field', 'data-field': k }, el('div', { class: 'k' }, k), el('div', { class: 'v' }, v));
+    cell.replaceChildren(
+      el('div', { class: 'fields' },
+        field('category', r.parsed.category), field('urgency', r.parsed.urgency), field('sentiment', r.parsed.sentiment)),
+      renderStats(r.stats));
+  } else if (r.invalidFormat) {
+    cell.replaceChildren(
+      el('span', { class: 'badge-bad' }, 'Invalid format'), ' ', el('span', {}, r.reason),
+      el('pre', { class: 'raw' }, r.raw),
+      renderStats(r.stats));
+  } else {
+    cell.replaceChildren(el('div', { class: 'error' }, r.error || 'Unknown error'), renderStats(r.stats));
+  }
+}
+
+function renderL2(cell, r) {
+  if (r.ok) cell.replaceChildren(el('div', { class: 'reply' }, r.text), renderStats(r.stats));
+  else cell.replaceChildren(el('div', { class: 'error' }, r.error || 'Unknown error'), renderStats(r.stats));
+}
+
+function renderSkipped(cell, message) {
+  cell.replaceChildren(el('div', { class: 'skipped' }, message));
+}
+
+// Rule: no Layer 2 without a valid Layer 1.
+function skipReason(r1) {
+  return r1.invalidFormat
+    ? 'Layer 2 skipped: Layer 1 returned an invalid format.'
+    : `Layer 2 skipped: Layer 1 failed (${r1.error || 'unknown error'}).`;
+}
+
+// ---------- Normal run ----------
+
+$('#run').onclick = async () => {
+  const ticket = $('#ticket').value.trim();
+  if (!ticket) { alert('Paste a ticket or pick a sample first.'); return; }
+  const m1 = $('#model1').value, m2 = $('#model2').value;
+  $('#run').disabled = true;
+  $('#results').hidden = false;
+  renderLoading($('#l1'), m1);
+  renderLoading($('#l2'), m2);
+  try {
+    const r1 = await post('/api/classify', { ticket, model: m1 });
+    renderL1($('#l1'), r1);
+    if (!r1.ok) return renderSkipped($('#l2'), skipReason(r1));
+    renderL2($('#l2'), await post('/api/reply', { ticket, classification: r1.parsed, model: m2 }));
+  } finally {
+    $('#run').disabled = false;
+  }
+};
+
+init();
+</script>
+</body>
+</html>

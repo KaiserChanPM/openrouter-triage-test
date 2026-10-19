@@ -1,0 +1,6 @@
+{
+  "models": ["PASTE_MODEL_ID_1", "PASTE_MODEL_ID_2", "PASTE_MODEL_ID_3"],
+  "defaults": { "layer1": "PASTE_MODEL_ID_1", "layer2": "PASTE_MODEL_ID_1" },
+  "temperature": { "layer1": 0, "layer2": 0.7 },
+  "useStructuredOutputs": false
+}

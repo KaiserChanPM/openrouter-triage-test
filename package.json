@@ -1,0 +1,11 @@
+{
+  "name": "openrouter-triage-test",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local learning tool: triage support tickets and compare AI models via OpenRouter",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.js"
+  }
+}

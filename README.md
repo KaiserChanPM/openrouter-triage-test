@@ -50,20 +50,24 @@ The dropdowns always include two **Test** models that the local server answers i
 
 Switch to **Compare models** at the top of the page. Pick a **Reference** model (required) and up to two more models, then click Run. Results show as a grid: one column per model, with a Layer 1 row and a Layer 2 row. Every cell shows the provider OpenRouter routed that call to, because the same model can be served by different providers on different runs.
 
-- **Fair layer test** (default): who writes the best reply from the same facts? Every model writes its reply from the Reference model's classification, so any difference between replies comes from the model itself. The classification row still shows what each model would have chosen. If the Reference classification is invalid, no replies are drafted.
+- **Fair layer test** (default): who writes the best reply from the same facts? Every model writes its reply from the same classification, so any difference between replies comes from the model itself. The classification row still shows what each model would have chosen.
+  - Test-set runs use the expected classification from `testset.csv`. An invalid Reference classification never blocks these replies.
+  - Single runs (a pasted or sample ticket) have no expected values, so they use the Reference model's classification. If it is invalid, no replies are drafted.
 - **End-to-end**: who handles the ticket best from start to finish? Each model classifies the ticket itself, then writes its reply from its own classification, mistakes included.
 - Layer 1 fields that differ from the Reference are highlighted. 💲 marks the cheapest and ⚡ the fastest successful result in each row.
+- Every reply names its source: "Expected (test set)", "Reference model" or "Own classification".
 
 ## Test set (batch evaluation)
 
 `testset.csv` holds 15 tickets with the expected classification for each, in the columns `id, ticket, expected_category, expected_urgency, expected_sentiment`. Edit it freely; it's re-read on every run. Rows with values outside the allowed lists are skipped, with a warning.
 
-In **Compare models**, click **Run test set**. Every ticket goes through the selected slots in the current mode (fair or end-to-end), with the same skip and invalid-format rules as a single run. Tickets run one at a time, so free-model rate limits are less likely to break the run, and a progress bar tracks the run. Within a ticket, the slots run in parallel.
+In **Compare models**, click **Run test set**. Every ticket goes through the selected slots in the current mode (fair or end-to-end). In Fair mode, replies use the expected classification and are never blocked by an invalid Reference. End-to-end keeps the single-run skip rules: a model's reply is skipped when its own Layer 1 is invalid or fails. Tickets run one at a time, so free-model rate limits are less likely to break the run, and a progress bar tracks the run. Within a ticket, the slots run in parallel, and each model's reply starts after its own Layer 1 finishes.
 
 - **Summary per model:** Layer 1 accuracy per field and for all three fields together, compared with the expected values. Invalid format and API errors count as wrong. It also shows the invalid-format rate (recoverable counted separately), the API error rate, total and average cost, average time per layer, and the average reply score.
 - **Layer 1 per ticket:** the expected values next to each model's classification, with mismatches highlighted.
 - **Layer 2 replies:** all replies for each ticket side by side, each with a 1–3 score using the rubric shown (accurate, tone, brief, no promises). Averages update as you score.
-- **Export CSV:** one file with the run details, the summary and a per-ticket section (both layers, stats, replies and your scores).
+  - The reply rubric is the general open-ended rubric adapted for support replies.
+- **Export CSV:** one file with the run details, the summary and a per-ticket section (both layers, the reply source and the classification it used, stats, replies and your scores).
 
 Results live only in the open page: export before refreshing.
 
@@ -85,7 +89,7 @@ Results live only in the open page: export before refreshing.
 | Temp | The temperature sent. It's flagged when the model's catalogue entry doesn't list `temperature` as supported. |
 | Format | Shown when `useStructuredOutputs` is on ([structured outputs](https://openrouter.ai/docs/features/structured-outputs)) |
 
-Layer 1 output must be exactly a JSON object with the allowed values. Anything else is labelled **Invalid format**. If it would pass after removing code fences or lowercasing values, the label adds "(recoverable: …)". Either way, Layer 2 is skipped.
+Layer 1 output must be exactly a JSON object with the allowed values. Anything else is labelled **Invalid format**. If it would pass after removing code fences or lowercasing values, the label adds "(recoverable: …)". Either way, any reply that depends on that classification is skipped.
 
 ## Where to change the prompts
 
@@ -94,6 +98,23 @@ Both prompts are in `prompts.js`.
 ## How this was built
 
 Built with Claude Code. I defined the scope, milestones and decisions.
+
+## How this follows the workflow
+
+This repo applies an 11-step workflow for choosing a model for each AI step in a feature. The numbers below are example targets for a learning project.
+
+| Step | What it means here | Where to find it |
+|---|---|---|
+| 1. Map the journey | Two AI steps: classify, then draft a reply. Classify needs AI because tickets are free text and urgency depends on business impact, not on how the customer sounds. Keyword rules miss a polite message about a team-wide outage, and a category dropdown would not cover urgency or sentiment. Draft needs AI because replying to every issue raised is writing work that fixed templates can't cover. A person reviews every draft. | This README |
+| 2. Set the bar | Classify: all three fields correct on at least 85% of tickets and urgency correct on at least 90%. No high-urgency ticket classified as low. No invalid outputs (recoverable allowed). Under $0.005 and 3 seconds per ticket. Draft reply: average reply score at least 2.5 of 3, and no reply scoring 1 on "no promises". Under $0.02 and 10 seconds per reply. The classify bar is stricter because it runs on every ticket with no one checking it, while every draft is reviewed by a person. | This README |
+| 3. Set the constraints | Privacy: the test tickets are made up, so zero data retention is not required for this test. A real product with customer tickets would require it, which would rule out the free model in `models.json` (it has no ZDR provider; see the ZDR demo). Budget: an assumed 2,000 tickets a month and a $50 monthly budget. That allows $0.025 per ticket across both layers and sets the cost bars in step 2. | This README; the ZDR option in the app |
+| 4. Write the prompt | Both prompts, including the urgency definitions based on business impact. | `prompts.js` |
+| 5. Build the test set | 15 tickets with expected values, including hard cases such as an angry customer with a minor issue, a polite message hiding an outage and two issues in one ticket. | `testset.csv` |
+| 6. Shortlist | Four models across price tiers: one free, one cheap and fast, one mid-priced and one premium. | `models.json` |
+| 7. Run the full test | Compare mode test-set runs: one ticket at a time, a fixed temperature per layer (0 for classify), Fair layer test or End-to-end. | The app |
+| 8. Score | The summary: accuracy per field and for all three, invalid and recoverable format rate, cost and time. Plus 1 to 3 reply scores. | The app and the CSV export |
+| 9. Decide and record | | Findings, below |
+| 10. Design for when AI is wrong, and 11. Ship, measure and retest | Not applicable. This is a local learning tool, not a shipped feature. | |
 
 ## Findings
 

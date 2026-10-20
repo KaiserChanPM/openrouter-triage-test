@@ -98,6 +98,7 @@
   .rcard { border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: #fff; }
   .rcard-h { font-size: 12.5px; font-weight: 600; margin-bottom: 6px; word-break: break-word; }
   .score { margin-top: 8px; }
+  .source { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
   .score select { width: auto; }
 
   @media (max-width: 640px) {
@@ -385,38 +386,53 @@ const currentSlots = () => SLOT_NAMES.map((name, i) => ({ name, model: $('#slot'
 const currentMode = () => document.querySelector('input[name=cmode]:checked').value;
 const slotHeader = (s) => `${s.name}: ${modelName(s.model)} (${s.model})`;
 
+// Which classification fed the reply step. Every Layer 2 result carries one of these as `source`.
+const REPLY_SOURCE = { expected: 'Expected (test set)', reference: 'Reference model', own: 'Own classification' };
+
+function replyInputText(r2) {
+  const values = r2?.input ? `: ${FIELDS.map((f) => r2.input[f]).join(' / ')}` : '';
+  return `Reply input: ${REPLY_SOURCE[r2?.source] ?? 'unknown'}${values}`;
+}
+
 // Runs one ticket through every slot in the given mode. Used by both Run and Run test set.
-// Returns { r1s, r2s, fairBlocked }; a skipped Layer 2 is { skipped: reason }.
-// `on` holds optional callbacks for live rendering: l1(i, r), l2Start(i), l2(i, r), l2Skip(i, reason), fairBlocked().
-async function runSlots({ ticket, slots, mode, zdr, on = {} }) {
+// `expected` is only passed by test-set runs: in Fair mode every reply then uses it instead of the
+// Reference classification. Returns { r1s, r2s, fairBlocked }. Every Layer 2 result has
+// `source` and `input` (the classification sent, or null); a skipped one is { skipped: reason, source, input }.
+// `on` holds optional callbacks for live rendering: l1(i, r), l2Start(i), l2(i, r), l2Skip(i, r2), fairBlocked().
+async function runSlots({ ticket, slots, mode, zdr, expected = null, on = {} }) {
   // Layer 1 runs on every slot, in parallel.
   const l1 = slots.map((s, i) => post('/api/classify', { ticket, model: s.model, zdr })
     .then((r) => { on.l1?.(i, r); return r; }));
 
-  const runReply = (i, classification) => {
+  const runReply = (i, classification, source) => {
     on.l2Start?.(i);
     return post('/api/reply', { ticket, classification, model: slots[i].model, zdr })
-      .then((r) => { on.l2?.(i, r); return r; });
+      .then((r) => { Object.assign(r, { source, input: classification }); on.l2?.(i, r); return r; });
+  };
+  const skip = (i, reason, source) => {
+    const r2 = { skipped: reason, source, input: null };
+    on.l2Skip?.(i, r2);
+    return r2;
   };
 
   let l2, fairBlocked = false;
-  if (mode === 'fair') {
-    // Every Layer 2 uses the Reference classification, so only the Reference result gates it.
+  if (mode === 'fair' && expected) {
+    // Test set: every reply uses the expected classification, so no Layer 1 result can block it.
+    // Each reply still waits for its own model's Layer 1, so at most one call per model is in flight.
+    l2 = l1.map((p, i) => p.then(() => runReply(i, expected, 'expected')));
+  } else if (mode === 'fair') {
+    // Single run: every Layer 2 uses the Reference classification, so only the Reference result gates it.
     const ref = await l1[0];
     if (ref.ok) {
-      l2 = slots.map((s, i) => runReply(i, ref.parsed));
+      l2 = slots.map((s, i) => runReply(i, ref.parsed, 'reference'));
     } else {
       fairBlocked = true;
       on.fairBlocked?.();
-      l2 = slots.map(() => ({ skipped: FAIR_BLOCKED }));
+      l2 = slots.map(() => ({ skipped: FAIR_BLOCKED, source: 'reference', input: null }));
     }
   } else {
     // Each column's Layer 2 uses its own Layer 1 result.
-    l2 = l1.map((p, i) => p.then((r1) => {
-      if (r1.ok) return runReply(i, r1.parsed);
-      on.l2Skip?.(i, skipReason(r1));
-      return { skipped: skipReason(r1) };
-    }));
+    l2 = l1.map((p, i) => p.then((r1) => (r1.ok ? runReply(i, r1.parsed, 'own') : skip(i, skipReason(r1), 'own'))));
   }
   return { r1s: await Promise.all(l1), r2s: await Promise.all(l2), fairBlocked };
 }
@@ -435,15 +451,16 @@ async function runCompare(ticket) {
     renderLoading(l2Cells[i], mode === 'fair' ? 'Waiting for the Reference classification…' : 'Waiting for Layer 1…');
   });
 
+  const sourceLine = (r2) => el('div', { class: 'source' }, replyInputText(r2));
   const { r1s, r2s } = await runSlots({
     ticket, slots, mode, zdr,
     on: {
       l1: (i, r) => renderL1(l1Cells[i], r),
       l2Start: (i) => renderLoading(l2Cells[i], 'Running…'),
-      l2: (i, r) => renderL2(l2Cells[i], r),
-      l2Skip: (i, reason) => renderSkipped(l2Cells[i], reason),
+      l2: (i, r) => { renderL2(l2Cells[i], r); l2Cells[i].prepend(sourceLine(r)); },
+      l2Skip: (i, r2) => { renderSkipped(l2Cells[i], r2.skipped); l2Cells[i].prepend(sourceLine(r2)); },
       fairBlocked: () => l2Row.replaceChildren(l2Row.firstChild,
-        el('td', { colspan: slots.length }, el('div', { class: 'skipped' }, FAIR_BLOCKED))),
+        el('td', { colspan: slots.length }, sourceLine({ source: 'reference' }), el('div', { class: 'skipped' }, FAIR_BLOCKED))),
     },
   });
   highlightDisagreements(r1s, l1Cells);
@@ -600,6 +617,7 @@ function appendReplyBlock(row) {
     const st = r2?.stats;
     return el('div', { class: 'rcard' },
       el('div', { class: 'rcard-h' }, slotHeader(s)),
+      el('div', { class: 'source' }, replyInputText(r2)),
       fallbackNotice(st) ?? '',
       body,
       st ? el('div', { class: 'stats' }, `${st.provider ?? 'unknown'} · ${fmtUsd(st.costUsd)} · ${fmtMs(st.ms)}`) : null,
@@ -631,7 +649,7 @@ $('#run-batch').onclick = async () => {
   $('#batch').hidden = false;
   $('#batch-meta').textContent = `${MODE_TEXT[mode][0]}${zdr ? ' · ZDR only' : ''} · started ${batch.startedAt.toLocaleString()}`;
   $('#batch-replies-mode').textContent = mode === 'fair'
-    ? "Fair layer test: every reply was written from the Reference model's classification."
+    ? 'Fair layer test: every reply was written from the expected classification in testset.csv, so replies are judged on correct facts. The Layer 1 results above did not feed the replies.'
     : 'End-to-end: each reply was written from its own model\'s classification.';
   $('#batch-replies').replaceChildren();
   renderTicketsHeader();
@@ -644,7 +662,7 @@ $('#run-batch').onclick = async () => {
       $('#batch-bar').max = batch.total;
       $('#batch-bar').value = n;
       $('#batch-status').textContent = `Running ticket ${n + 1} of ${batch.total} (id ${item.id})…`;
-      const out = await runSlots({ ticket: item.ticket, slots, mode, zdr });
+      const out = await runSlots({ ticket: item.ticket, slots, mode, zdr, expected: item.expected });
       const row = { item, ...out };
       batch.rows.push(row);
       appendTicketRow(row);
@@ -694,7 +712,8 @@ $('#batch-export').onclick = () => {
   line('PER TICKET');
   line('ticket_id', 'ticket', 'expected_category', 'expected_urgency', 'expected_sentiment', 'slot', 'model',
     'l1_status', 'got_category', 'got_urgency', 'got_sentiment', 'l1_fields_correct', 'l1_raw_or_error',
-    'l1_provider', 'l1_cost_usd', 'l1_ms', 'l2_status', 'reply_or_reason', 'l2_provider', 'l2_cost_usd', 'l2_ms',
+    'l1_provider', 'l1_cost_usd', 'l1_ms', 'reply_input', 'reply_input_category', 'reply_input_urgency',
+    'reply_input_sentiment', 'l2_status', 'reply_or_reason', 'l2_provider', 'l2_cost_usd', 'l2_ms',
     'fallback_used', 'reply_score');
   for (const row of batch.rows) {
     batch.slots.forEach((s, i) => {
@@ -706,6 +725,7 @@ $('#batch-export').onclick = () => {
         r1.ok ? FIELDS.filter((f) => got[f] === e[f]).length : 0,
         r1.ok ? '' : (r1.raw ?? r1.error),
         r1.stats?.provider, usd(r1.stats?.costUsd), r1.stats?.ms,
+        REPLY_SOURCE[r2?.source] ?? '', ...FIELDS.map((f) => r2?.input?.[f]),
         l2status, r2?.ok ? r2.text : (r2?.skipped ?? r2?.error), r2?.stats?.provider, usd(r2?.stats?.costUsd), r2?.stats?.ms,
         r1.stats?.fallbackUsed || r2?.stats?.fallbackUsed ? 'yes' : '',
         batch.scores[scoreKey(row.item.id, i)] ?? '');

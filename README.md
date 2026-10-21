@@ -9,6 +9,8 @@ Each layer has its own model dropdown, and every run shows the model, the provid
 
 This is a learning tool. It runs locally for one user and is not meant to be deployed.
 
+Personal learning project, licensed under [PolyForm Strict 1.0.0](#licence-and-contributions): non-commercial use only, and no contributions.
+
 ## Run it
 
 Requires Node.js 22 or later. There are no dependencies to install.
@@ -94,6 +96,12 @@ Layer 1 output must be exactly a JSON object with the allowed values. Anything e
 ## Where to change the prompts
 
 Both prompts are in `prompts.js`.
+
+## Licence and contributions
+
+This is a personal learning project, licensed under PolyForm Strict 1.0.0. You're welcome to view the code, clone it and run it locally for your own non-commercial use. Please don't redistribute it or use it commercially.
+
+I'm not accepting contributions, pull requests or feature requests.
 
 ## How this was built
 

@@ -4,7 +4,7 @@
   "private": true,
   "description": "Local learning tool: triage support tickets and compare AI models via OpenRouter",
   "type": "module",
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "scripts": {
     "start": "node --env-file-if-exists=.env server.js"
   }

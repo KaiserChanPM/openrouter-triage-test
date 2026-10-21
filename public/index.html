@@ -455,7 +455,11 @@ async function runCompare(ticket) {
   const { r1s, r2s } = await runSlots({
     ticket, slots, mode, zdr,
     on: {
-      l1: (i, r) => renderL1(l1Cells[i], r),
+      l1: (i, r) => {
+        renderL1(l1Cells[i], r);
+        // Fair mode: only the Reference classification feeds the replies.
+        if (mode === 'fair' && i > 0) l1Cells[i].prepend(el('div', { class: 'source' }, 'For comparison only. Not used for replies.'));
+      },
       l2Start: (i) => renderLoading(l2Cells[i], 'Running…'),
       l2: (i, r) => { renderL2(l2Cells[i], r); l2Cells[i].prepend(sourceLine(r)); },
       l2Skip: (i, r2) => { renderSkipped(l2Cells[i], r2.skipped); l2Cells[i].prepend(sourceLine(r2)); },

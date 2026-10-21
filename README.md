@@ -110,39 +110,69 @@ This repo applies an 11-step workflow for choosing a model for each AI step in a
 | 3. Set the constraints | Privacy: the test tickets are made up, so zero data retention is not required for this test. A real product with customer tickets would require it, which would rule out the free model in `models.json` (it has no ZDR provider; see the ZDR demo). Budget: an assumed 2,000 tickets a month and a $50 monthly budget. That allows $0.025 per ticket across both layers and sets the cost bars in step 2. | This README; the ZDR option in the app |
 | 4. Write the prompt | Both prompts, including the urgency definitions based on business impact. | `prompts.js` |
 | 5. Build the test set | 15 tickets with expected values, including hard cases such as an angry customer with a minor issue, a polite message hiding an outage and two issues in one ticket. | `testset.csv` |
-| 6. Shortlist | Four models across price tiers: one free, one cheap and fast, one mid-priced and one premium. | `models.json` |
+| 6. Shortlist | Four models across price tiers, from free to premium. | `models.json` |
 | 7. Run the full test | Compare mode test-set runs: one ticket at a time, a fixed temperature per layer (0 for classify), Fair layer test or End-to-end. | The app |
 | 8. Score | The summary: accuracy per field and for all three, invalid and recoverable format rate, cost and time. Plus 1 to 3 reply scores. | The app and the CSV export |
-| 9. Decide and record | | Findings, below |
+| 9. Decide and record | DeepSeek V4.1 Flash for both layers, with Claude Sonnet 5.5 as the reply backup. The classify choice is provisional until a rerun. | Findings, below |
 | 10. Design for when AI is wrong, and 11. Ship, measure and retest | Not applicable. This is a local learning tool, not a shipped feature. | |
 
 ## Findings
 
-<!-- Filled in after running the test set. The exported CSV can live next to this README. -->
+This section covers steps 7 to 9 of the workflow above, judged against the bars in step 2.
 
-### Models tested
+### Test runs
 
-<!-- Which models were in which slot, the compare mode (fair or end-to-end), ZDR on or off, and the date of the run. -->
+Two test-set runs on 21 October 2026 (UTC), in Fair layer test mode with zero data retention off. Compare mode takes three models at a time, so the four shortlisted models needed two runs, with Nemotron and Claude in both.
+
+- **Run 1:** Nemotron 3 Ultra (free, Reference), DeepSeek V4.1 Flash, Claude Sonnet 5.5. Results: [`test-set-2026-10-21-01-40.csv`](test-set-2026-10-21-01-40.csv)
+- **Run 2:** Nemotron 3 Ultra (free, Reference), Gemini 3.8 Flash, Claude Sonnet 5.5. Results: [`test-set-2026-10-21-01-57.csv`](test-set-2026-10-21-01-57.csv)
+
+In Fair mode every reply was written from the test set's expected classification, so the reply results compare writing only. Claude Sonnet 5.5 ignores the temperature setting. Nemotron and Claude gave the same Layer 1 answers in both runs.
+
+Reply scores use the rubric described under "Test set" above, scored by one reviewer. Costs are OpenRouter's reported cost per request and leave out the platform fee on credit purchases.
 
 ### Results
 
-<!-- Key numbers from the summary table: accuracy per field and all-3, invalid-format rate (recoverable separately),
-     cost per ticket, response time, and average reply score. Which tickets tripped models up? -->
+**Layer 1: classify**
+
+| Model | Category | Urgency | Sentiment | All 3 | High marked low | Invalid format | Cost per ticket | Avg time |
+|---|---|---|---|---|---|---|---|---|
+| Nemotron 3 Ultra (free) | 100% | 87% | 87% | 73% | 0 | 0% | $0 | 2.7–2.9 s |
+| DeepSeek V4.1 Flash | 100% | 93% | 87% | 80% | 0 | 0% | $0.00012 | 1.3 s |
+| Gemini 3.8 Flash | 100% | 93% | 87% | 80% | 0 | 0% | $0.00134 | 4.0 s |
+| Claude Sonnet 5.5 | 100% | 93% | 80% | 73% | 0 | 0% | $0.00112 | 1.2–1.6 s |
+
+**Layer 2: draft reply**
+
+| Model | Avg reply score | Replies scored 1 | Cost per reply | Avg time (slowest) |
+|---|---|---|---|---|
+| Nemotron 3 Ultra (free) | 2.27 (run 1), 2.20 (run 2) | 4, then 5 | $0 | 7.2–8.9 s (59.8 s) |
+| DeepSeek V4.1 Flash | 2.87 | 0 | $0.00042 | 4.0 s (10.2 s) |
+| Gemini 3.8 Flash | 2.87 | 0 | $0.00317 | 7.5 s (16.9 s) |
+| Claude Sonnet 5.5 | 3.00 | 0 | $0.00277 | 2.4–2.5 s (4.4 s) |
+
+**Against the bars in step 2**
+
+- **Layer 1:** no model reached 85% on all three fields; the best was 80%. DeepSeek, Gemini and Claude cleared the urgency bar (90%); Nemotron didn't. No model marked a high-urgency ticket low, and none returned invalid output. Every model was under $0.005 per ticket. Gemini missed the 3-second bar.
+- **Layer 2:** DeepSeek, Gemini and Claude cleared the reply bar (average 2.5 or higher, no reply scoring 1 on "no promises"). Nemotron didn't. All were under $0.02 per reply. On average all were under 10 seconds, but Nemotron and Gemini each had replies well over it.
 
 ### Decision per layer
 
 #### Layer 1: classify
 
-**Model:** <!-- chosen model -->
+**Model:** DeepSeek V4.1 Flash, provisional.
 
-**Why:** <!-- accuracy vs cost vs speed vs format reliability -->
+**Why:** No model cleared every Layer 1 bar, so strictly none qualifies yet. DeepSeek tied for best on all three fields (80%) and on urgency (93%), made no costly mistake and returned no invalid output. It is about 11 times cheaper than Gemini, the other model tied for best, and three times faster. Gemini also missed the time bar. Before making this final, I'll fix the two problems the test exposed: ticket 1's expected urgency contradicts the prompt's own rule, and the prompt doesn't define sentiment. Then I'll rerun all models on the same test set.
 
 #### Layer 2: draft reply
 
-**Model:** <!-- chosen model -->
+**Model:** DeepSeek V4.1 Flash. **Backup:** Claude Sonnet 5.5.
 
-**Why:** <!-- reply scores vs cost vs speed -->
+**Why:** Nemotron is ruled out: it averaged 2.2 and invented facts in 4 to 5 replies per run. DeepSeek, Gemini and Claude all cleared every Layer 2 bar, so I chose the cheapest. DeepSeek costs $0.00042 per reply, against $0.00277 for Claude and $0.00317 for Gemini. Claude scored higher (3.00 against 2.87), but that small gain isn't worth more than six times the cost on a step where a person reviews every draft. Claude is the backup because it cleared the same bars and comes from a different model maker. Both layers on DeepSeek cost about $0.00055 per ticket, or about $1.10 a month at 2,000 tickets, well inside the $50 budget. DeepSeek's calls in this test went to nine different providers, so in production I'd pin it to one and retest on that provider.
 
-### Why (overall)
+### What the test taught me
 
-<!-- What the trade-offs were, what surprised me, and what I would test next. -->
+- **The biggest misses were in my setup, not the models.** All four models rated ticket 1 medium urgency; my test set says low, but my own prompt defines that case as medium. Most other misses were sentiment, which the prompt never defines. *(Workflow steps 4 and 5: write the prompt and answer key carefully, and read the misses before blaming a model.)*
+- **A cheap model matched premium ones on the narrow task.** DeepSeek tied the best classification results at about a tenth of the cost. *(Rule of thumb: test before assuming premium wins.)*
+- **Free wasn't free for writing.** Nemotron classified reasonably but invented facts in its replies, such as "We've corrected this". *(This is why step 1 has a person review every draft.)*
+- **Next:** correct ticket 1, define sentiment, and rerun; pin DeepSeek to one provider; add tickets near the medium/high urgency line.
